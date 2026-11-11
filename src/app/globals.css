@@ -196,11 +196,16 @@ h1 {
   letter-spacing: -0.04em;
   line-height: 1.08;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--text-primary);
 }
 h1 em {
   font-style: normal;
   background: linear-gradient(135deg, #00d2b4 0%, #388bfd 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+[data-theme="light"] h1 em {
+  background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
