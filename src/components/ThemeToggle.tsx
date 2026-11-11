@@ -2,28 +2,39 @@
 
 import { useSyncExternalStore } from "react";
 
-const emptySubscribe = () => () => undefined;
-function getThemeClient(): "dark" | "light" {
+const themeListeners = new Set<() => void>();
+
+function subscribeTheme(callback: () => void) {
+  themeListeners.add(callback);
+  return () => {
+    themeListeners.delete(callback);
+  };
+}
+
+function getThemeSnapshot(): "dark" | "light" {
   if (typeof window === "undefined") return "dark";
   const saved = localStorage.getItem("oculicare_theme");
-  return saved === "light" ? "light" : "dark";
+  if (saved === "light" || saved === "dark") return saved;
+  const currentAttr = document.documentElement.getAttribute("data-theme");
+  return currentAttr === "light" ? "light" : "dark";
 }
-function getThemeServer(): "dark" | "light" {
+
+function getThemeServerSnapshot(): "dark" | "light" {
   return "dark";
 }
 
 export function ThemeToggle() {
-  const theme = useSyncExternalStore(emptySubscribe, getThemeClient, getThemeServer);
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getThemeServerSnapshot);
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem("oculicare_theme", next);
-      window.location.reload();
     } catch {
       // ignore
     }
+    themeListeners.forEach((fn) => fn());
   };
 
   return (

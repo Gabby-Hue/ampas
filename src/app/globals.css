@@ -16,6 +16,9 @@
   --accent-blue: #388bfd;
   --coral-danger: #f85149;
   --coral-glow: rgba(248, 81, 73, 0.25);
+
+  --deep-btn: #f0f3f6;
+  --deep-btn-text: #090b0e;
 }
 
 [data-theme="light"] {
@@ -34,6 +37,9 @@
   --accent-blue: #0284c7;
   --coral-danger: #e11d48;
   --coral-glow: rgba(225, 29, 72, 0.25);
+
+  --deep-btn: #0f172a;
+  --deep-btn-text: #ffffff;
 }
 
 :root {
@@ -215,8 +221,8 @@ h1 em {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: var(--text-primary);
-  color: var(--canvas);
+  background: var(--deep-btn);
+  color: var(--deep-btn-text);
   padding: 12px 22px;
   border-radius: 8px;
   font-size: 0.88rem;
@@ -226,9 +232,9 @@ h1 em {
   transition: all 0.15s ease;
 }
 .primary-button:hover:not(:disabled) {
-  background: #ffffff;
+  opacity: 0.92;
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 .primary-button:disabled {
   opacity: 0.4;
@@ -324,7 +330,7 @@ h1 em {
   border-radius: 12px;
   padding: 20px;
 }
-.principle-item h3 { margin: 0 0 6px; font-size: 0.95rem; font-weight: 700; color: #ffffff; }
+.principle-item h3 { margin: 0 0 6px; font-size: 0.95rem; font-weight: 700; color: var(--text-primary); }
 .principle-item p { margin: 0; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.5; }
 
 /* Screening Workflow Layout */

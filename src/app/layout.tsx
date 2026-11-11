@@ -9,7 +9,23 @@ export const metadata: Metadata = {
 };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id" data-theme="dark" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="id" data-theme="dark" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                var saved = localStorage.getItem('oculicare_theme');
+                if (saved === 'light' || saved === 'dark') {
+                  document.documentElement.setAttribute('data-theme', saved);
+                } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                  document.documentElement.setAttribute('data-theme', 'light');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
