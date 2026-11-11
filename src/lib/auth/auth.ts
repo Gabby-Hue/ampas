@@ -96,6 +96,15 @@ export function getActiveUser(): SafeUser | null {
   }
 }
 
+const authListeners = new Set<() => void>();
+
+export function subscribeAuth(callback: () => void) {
+  authListeners.add(callback);
+  return () => {
+    authListeners.delete(callback);
+  };
+}
+
 export function setActiveUser(user: SafeUser | null): void {
   if (typeof window === "undefined") return;
   try {
@@ -107,4 +116,5 @@ export function setActiveUser(user: SafeUser | null): void {
   } catch {
     // ignore
   }
+  authListeners.forEach((fn) => fn());
 }

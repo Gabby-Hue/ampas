@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, setActiveUser, type SafeUser } from "@/lib/auth/auth";
+import { getActiveUser, subscribeAuth, setActiveUser, type SafeUser } from "@/lib/auth/auth";
 import {
   loadHistoryFromStorage,
   getUserSessions,
@@ -12,7 +12,6 @@ import {
   type SessionHistoryEntry,
 } from "@/lib/storage/history";
 
-const emptySubscribe = () => () => undefined;
 function getActiveUserClient(): SafeUser | null {
   return getActiveUser();
 }
@@ -20,21 +19,29 @@ function getActiveUserServer(): SafeUser | null {
   return null;
 }
 
+function getHistorySnapshot(): SessionHistoryEntry[] {
+  if (typeof window === "undefined") return [];
+  const active = getActiveUser();
+  if (!active) return [];
+  return getUserSessions(loadHistoryFromStorage(), active.id);
+}
+function getHistoryServerSnapshot(): SessionHistoryEntry[] {
+  return [];
+}
+
 export default function DashboardPage() {
   const router = useRouter();
-  const user = useSyncExternalStore(emptySubscribe, getActiveUserClient, getActiveUserServer);
-  const [sessions] = useState<SessionHistoryEntry[]>(() => {
-    if (typeof window === "undefined") return [];
-    const active = getActiveUser();
-    if (!active) return [];
-    return getUserSessions(loadHistoryFromStorage(), active.id);
-  });
+  const user = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
+  const sessions = useSyncExternalStore(subscribeAuth, getHistorySnapshot, getHistoryServerSnapshot);
 
   useEffect(() => {
-    if (!user) {
-      router.push("/login");
+    if (typeof window !== "undefined") {
+      const active = getActiveUser();
+      if (!active) {
+        router.push("/login");
+      }
     }
-  }, [user, router]);
+  }, [router]);
 
   const handleLogout = () => {
     setActiveUser(null);
@@ -59,11 +66,15 @@ export default function DashboardPage() {
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
-        <div className="nav-links">
+        <div className="nav-center-menu">
+          <Link href="/">Beranda</Link>
+          <Link href="/screening">Mulai Tes</Link>
+          <span className="status-pill" style={{ padding: "3px 8px", fontSize: "0.68rem" }}>
+            DASHBOARD TERKUNCI
+          </span>
+        </div>
+        <div className="nav-right-actions">
           <ThemeToggle />
-          <Link className="text-link" href="/">
-            Beranda
-          </Link>
           <button
             type="button"
             className="secondary-button"
@@ -76,11 +87,11 @@ export default function DashboardPage() {
       </nav>
 
       {/* Dashboard Header */}
-      <div style={{ padding: "36px 0 24px" }}>
+      <div style={{ padding: "32px 0 24px" }}>
         <div className="status-pill">
           <span className="status-dot" /> Akun Terverifikasi Lokal
         </div>
-        <h1 style={{ fontSize: "2.2rem", margin: "16px 0 8px" }}>
+        <h1 style={{ fontSize: "2.2rem", margin: "16px 0 8px", color: "var(--text-primary)" }}>
           Selamat datang, <em>{user.name}</em>
         </h1>
         <p style={{ color: "var(--text-secondary)", fontSize: "0.92rem", margin: 0 }}>

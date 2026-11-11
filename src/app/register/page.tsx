@@ -43,7 +43,11 @@ export default function RegisterPage() {
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
-        <div className="nav-links">
+        <div className="nav-center-menu">
+          <Link href="/">Beranda</Link>
+          <Link href="/screening">Mulai Tes</Link>
+        </div>
+        <div className="nav-right-actions">
           <ThemeToggle />
           <Link className="text-link" href="/">
             Beranda
@@ -58,7 +62,7 @@ export default function RegisterPage() {
             <span className="badge-live">DATA PRIVACY</span>
           </div>
 
-          <h1 style={{ fontSize: "1.8rem", margin: "20px 0 6px" }}>Daftar Akun OculiCare</h1>
+          <h1 style={{ fontSize: "1.8rem", margin: "20px 0 6px", color: "var(--text-primary)" }}>Daftar Akun OculiCare</h1>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", margin: "0 0 24px", lineHeight: 1.5 }}>
             Buat akun untuk memantau perkembangan stamina atensi dan menyimpan riwayat rujukan mandiri.
           </p>

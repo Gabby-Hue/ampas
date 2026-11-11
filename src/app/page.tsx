@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
+import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
 
-const emptySubscribe = () => () => undefined;
 function getActiveUserClient(): SafeUser | null {
   return getActiveUser();
 }
@@ -72,7 +71,7 @@ const comparisonData = [
 ];
 
 export default function Home() {
-  const user = useSyncExternalStore(emptySubscribe, getActiveUserClient, getActiveUserServer);
+  const user = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
 
   return (
     <main className="site-shell">
@@ -82,14 +81,17 @@ export default function Home() {
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
-        <div className="nav-links">
+        <div className="nav-center-menu">
           <a href="#spektrum-kondisi">Spektrum Gangguan</a>
-          <a href="#matriks-komparasi">Matriks Deteksi</a>
+          <a href="#matriks-komparasi">Matriks Triangulasi</a>
+          <a href="#cara-kerja">Cara Kerja</a>
           <a href="#privasi">Privasi & Etika</a>
+        </div>
+        <div className="nav-right-actions">
           <ThemeToggle />
           {user ? (
             <Link className="secondary-button" style={{ padding: "6px 14px", fontSize: "0.8rem" }} href="/dashboard">
-              Buka Dashboard ({user.name.split(" ")[0]})
+              Dashboard ({user.name.split(" ")[0]})
             </Link>
           ) : (
             <>
@@ -139,35 +141,60 @@ export default function Home() {
         {/* Live Interactive Telemetry Card */}
         <div className="hero-card">
           <div className="card-header">
-            <span>TELEMETRY_RUNTIME // PREVIEW</span>
-            <span className="badge-live">LOCAL WASM</span>
+            <span>OKULOMOTORIK & REAKSI MOTORIK</span>
+            <span className="badge-live">LIVE WASM TRACK</span>
           </div>
 
-          <div style={{ margin: "24px 0 16px" }}>
-            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase" }}>
-              Psychomotor Speed (Median RT)
-            </div>
-            <div style={{ fontSize: "2.5rem", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)", margin: "4px 0" }}>
-              384 <span style={{ fontSize: "1rem", color: "var(--text-secondary)", fontWeight: 500 }}>ms</span>
-            </div>
-            <div style={{ fontSize: "0.82rem", color: "var(--accent-teal)", fontFamily: "var(--font-mono)", fontWeight: 600 }}>
-              Inhibitory Control: 86.4% Correct Rejection
+          <div style={{ margin: "16px 0 12px" }}>
+            <div className="interactive-radar-canvas" aria-label="Simulasi radar fiksasi tatapan mata">
+              <div className="radar-ring radar-ring-3" />
+              <div className="radar-ring radar-ring-2" />
+              <div className="radar-ring radar-ring-1" />
+              <div className="radar-sweep" />
+              <div className="radar-blip" style={{ top: "42%", left: "54%" }} />
+              <div className="radar-blip" style={{ top: "52%", left: "47%", opacity: 0.6 }} />
+              <div className="radar-blip" style={{ top: "46%", left: "50%", opacity: 0.9 }} />
+              <div style={{ position: "absolute", bottom: "8px", left: "10px", fontSize: "0.68rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)" }}>
+                FIKSASI PUPIL 30Hz: STABIL
+              </div>
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid var(--surface-border)", paddingTop: "16px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", color: "var(--text-secondary)", marginBottom: "8px" }}>
-              <span>Kurva Ketahanan Atensi 60 Detik</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>Blok 1 → Blok 6</span>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", margin: "14px 0" }}>
+            <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "8px", border: "1px solid var(--surface-border)" }}>
+              <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                MEDIAN REACTION TIME
+              </div>
+              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)", margin: "2px 0" }}>
+                384 <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 500 }}>ms</span>
+              </div>
+              <span style={{ fontSize: "0.72rem", color: "var(--accent-teal)", fontWeight: 600 }}>Rentang Optimal</span>
             </div>
-            <div style={{ height: "52px", display: "flex", alignItems: "end", gap: "6px" }}>
+
+            <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "8px", border: "1px solid var(--surface-border)" }}>
+              <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                MOTOR INHIBITION
+              </div>
+              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)", margin: "2px 0" }}>
+                86.4%
+              </div>
+              <span style={{ fontSize: "0.72rem", color: "var(--accent-teal)", fontWeight: 600 }}>Correct Rejection</span>
+            </div>
+          </div>
+
+          <div style={{ borderTop: "1px solid var(--surface-border)", paddingTop: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", color: "var(--text-secondary)", marginBottom: "8px" }}>
+              <span>Kurva Ketahanan Fokus 60 Detik</span>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent-teal)" }}>Blok 1 → Blok 6</span>
+            </div>
+            <div style={{ height: "40px", display: "flex", alignItems: "end", gap: "6px" }}>
               {[96, 92, 88, 85, 75, 68].map((v, i) => (
                 <div key={i} style={{ flex: 1, height: "100%", display: "flex", alignItems: "end" }}>
                   <div
                     style={{
                       width: "100%",
                       height: `${v}%`,
-                      background: "linear-gradient(180deg, var(--accent-teal) 0%, rgba(0, 210, 180, 0.3) 100%)",
+                      background: "linear-gradient(180deg, var(--accent-teal) 0%, rgba(16, 185, 129, 0.25) 100%)",
                       borderRadius: "3px 3px 0 0",
                     }}
                   />
@@ -265,6 +292,65 @@ export default function Home() {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* Cara Kerja & Triangulasi Section */}
+      <section className="screening-content" id="cara-kerja" style={{ padding: "36px 0 64px" }}>
+        <div style={{ maxWidth: "780px", marginBottom: "28px" }}>
+          <div className="status-pill" style={{ marginBottom: "12px" }}>
+            Alur Penapisan Terstandar
+          </div>
+          <h2 style={{ fontSize: "1.8rem", fontWeight: 700, margin: "0 0 12px", color: "var(--text-primary)" }}>
+            Bagaimana OculiCare Mengamati Fokusmu dalam 3 Langkah
+          </h2>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.55 }}>
+            Dirancang tanpa gesekan teknis, melindungi privasi penuh, dan menghasilkan lembar rujukan dalam waktu kurang dari 2 menit.
+          </p>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
+          <div className="result-card">
+            <div>
+              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
+                LANGKAH 01
+              </div>
+              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
+                Validasi Keluhan Kronis (WHO ASRS)
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Enam pertanyaan saringan baku World Health Organization untuk memetakan apakah kesulitan konsentrasi terjadi secara persisten dalam 6 bulan terakhir.
+              </p>
+            </div>
+          </div>
+
+          <div className="result-card">
+            <div>
+              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
+                LANGKAH 02
+              </div>
+              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
+                Tes Refleks CPT Go/No-Go 60 Detik
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Stimulus foveal kilat 250 milidetik menguji kecepatan rem motorik otakmu saat target hijau dan merah muncul bergantian di lingkungan terkontrol.
+              </p>
+            </div>
+          </div>
+
+          <div className="result-card">
+            <div>
+              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
+                LANGKAH 03
+              </div>
+              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
+                Lembar Rujukan Klinis Siap Cetak
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Dapatkan dokumen rujukan PDF satu halaman A4 yang merangkum kurva kelelahan atensi, indeks kelengahan, dan catatan teknis untuk dokter atau psikolog.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
+import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
 import { persistSessionToStorage } from "@/lib/storage/history";
 import {
   createCptTrials,
@@ -62,7 +62,6 @@ function getServerDeviceStatus() {
   return "Menyiapkan browser…";
 }
 
-const emptySubscribe = () => () => undefined;
 function getActiveUserClient(): SafeUser | null {
   return getActiveUser();
 }
@@ -135,7 +134,7 @@ export default function ScreeningPage() {
   const activeTrialRef = useRef<Trial | null>(null);
 
   // Use external store for active user to avoid cascading renders
-  const activeUserFromStore = useSyncExternalStore(emptySubscribe, getActiveUserClient, getActiveUserServer);
+  const activeUserFromStore = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
 
   const requestFullscreen = async () => {
     try {
@@ -460,17 +459,8 @@ export default function ScreeningPage() {
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
-        <div className="nav-links">
-          <ThemeToggle />
-          {activeUserFromStore ? (
-            <Link className="text-link" href="/dashboard">
-              Dashboard ({activeUserFromStore.name.split(" ")[0]})
-            </Link>
-          ) : (
-            <Link className="text-link" href="/login">
-              Masuk
-            </Link>
-          )}
+        <div className="nav-center-menu">
+          <Link href="/">Beranda</Link>
           <span className="status-pill">
             {phase === "questionnaire"
               ? "1/3 KUESIONER KRONIS"
@@ -481,6 +471,18 @@ export default function ScreeningPage() {
               : "RINGKASAN HASIL"}
           </span>
         </div>
+        <div className="nav-right-actions">
+          <ThemeToggle />
+          {activeUserFromStore ? (
+            <Link className="text-link" href="/dashboard">
+              Dashboard ({activeUserFromStore.name.split(" ")[0]})
+            </Link>
+          ) : (
+            <Link className="text-link" href="/login">
+              Masuk
+            </Link>
+          )}
+        </div>
       </nav>
 
       {/* PHASE 1: WHO ASRS Questionnaire */}
@@ -489,7 +491,7 @@ export default function ScreeningPage() {
           <div className="status-pill">
             <span className="status-dot" /> Tahap 1 dari 3: Pengenalan Gejala Harian
           </div>
-          <h1>
+          <h1 style={{ color: "var(--text-primary)" }}>
             Bagaimana pola fokusmu <em>6 bulan terakhir?</em>
           </h1>
           <p className="hero-lede">
@@ -537,7 +539,7 @@ export default function ScreeningPage() {
           <div className="status-pill">
             <span className="status-dot" /> Tahap 2 dari 3: Verifikasi Integritas Pengujian
           </div>
-          <h1>
+          <h1 style={{ color: "var(--text-primary)" }}>
             Standar lingkungan tes <em>terkontrol.</em>
           </h1>
           <p className="hero-lede">
@@ -785,7 +787,7 @@ export default function ScreeningPage() {
             <div className="status-pill">
               <span className="status-dot" /> {isDemo ? `Simulasi Benchmark · ${demoProfile.toUpperCase()}` : `Sesi Selesai · ${formatSessionDate(sessionStartedAt)}`}
             </div>
-            <h1>
+            <h1 style={{ color: "var(--text-primary)" }}>
               Hasil Pengamatan <em>Ritme Fokusmu.</em>
             </h1>
             <p className="hero-lede">
