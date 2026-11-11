@@ -1,41 +1,47 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
-
-const themeListeners = new Set<() => void>();
-
-function subscribeTheme(callback: () => void) {
-  themeListeners.add(callback);
-  return () => {
-    themeListeners.delete(callback);
-  };
-}
-
-function getThemeSnapshot(): "dark" | "light" {
-  if (typeof window === "undefined") return "dark";
-  const saved = localStorage.getItem("oculicare_theme");
-  if (saved === "light" || saved === "dark") return saved;
-  const currentAttr = document.documentElement.getAttribute("data-theme");
-  return currentAttr === "light" ? "light" : "dark";
-}
-
-function getThemeServerSnapshot(): "dark" | "light" {
-  return "dark";
-}
+import { useEffect, useState } from "react";
 
 export function ThemeToggle() {
-  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getThemeServerSnapshot);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const saved = localStorage.getItem("oculicare_theme") as "dark" | "light" | null;
+    if (saved === "light" || saved === "dark") {
+      setTheme(saved);
+      document.documentElement.setAttribute("data-theme", saved);
+    } else {
+      const current = document.documentElement.getAttribute("data-theme") as "dark" | "light" | null;
+      if (current === "light" || current === "dark") {
+        setTheme(current);
+      }
+    }
+  }, []);
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem("oculicare_theme", next);
     } catch {
       // ignore
     }
-    themeListeners.forEach((fn) => fn());
   };
+
+  if (!mounted) {
+    return (
+      <button
+        type="button"
+        className="theme-toggle-btn"
+        aria-label="Toggle tema tampilan"
+      >
+        <span style={{ width: "15px", height: "15px", display: "inline-block" }} />
+      </button>
+    );
+  }
 
   return (
     <button

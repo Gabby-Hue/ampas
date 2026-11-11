@@ -1,16 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
-
-function getActiveUserClient(): SafeUser | null {
-  return getActiveUser();
-}
-function getActiveUserServer(): SafeUser | null {
-  return null;
-}
+import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
 
 const conditions = [
   {
@@ -71,7 +64,11 @@ const comparisonData = [
 ];
 
 export default function Home() {
-  const user = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
+  const [user, setUser] = useState<SafeUser | null>(null);
+
+  useEffect(() => {
+    setUser(getActiveUser());
+  }, []);
 
   return (
     <main className="site-shell">

@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, subscribeAuth, setActiveUser, type SafeUser } from "@/lib/auth/auth";
+import { getActiveUser, setActiveUser, type SafeUser } from "@/lib/auth/auth";
 import {
   loadHistoryFromStorage,
   getUserSessions,
@@ -12,34 +12,21 @@ import {
   type SessionHistoryEntry,
 } from "@/lib/storage/history";
 
-function getActiveUserClient(): SafeUser | null {
-  return getActiveUser();
-}
-function getActiveUserServer(): SafeUser | null {
-  return null;
-}
-
-function getHistorySnapshot(): SessionHistoryEntry[] {
-  if (typeof window === "undefined") return [];
-  const active = getActiveUser();
-  if (!active) return [];
-  return getUserSessions(loadHistoryFromStorage(), active.id);
-}
-function getHistoryServerSnapshot(): SessionHistoryEntry[] {
-  return [];
-}
-
 export default function DashboardPage() {
   const router = useRouter();
-  const user = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
-  const sessions = useSyncExternalStore(subscribeAuth, getHistorySnapshot, getHistoryServerSnapshot);
+  const [user, setUser] = useState<SafeUser | null>(null);
+  const [sessions, setSessions] = useState<SessionHistoryEntry[]>([]);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const active = getActiveUser();
-      if (!active) {
-        router.push("/login");
-      }
+    const active = getActiveUser();
+    if (!active) {
+      router.push("/login");
+    } else {
+      setUser(active);
+      const all = loadHistoryFromStorage();
+      setSessions(getUserSessions(all, active.id));
+      setIsReady(true);
     }
   }, [router]);
 
@@ -48,7 +35,7 @@ export default function DashboardPage() {
     router.push("/");
   };
 
-  if (!user) {
+  if (!isReady || !user) {
     return (
       <main className="site-shell" style={{ padding: "80px 0", textAlign: "center", color: "var(--text-muted)" }}>
         Memverifikasi akun pengguna…

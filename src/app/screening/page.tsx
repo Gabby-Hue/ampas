@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
+import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
 import { persistSessionToStorage } from "@/lib/storage/history";
 import {
   createCptTrials,
@@ -62,15 +62,9 @@ function getServerDeviceStatus() {
   return "Menyiapkan browser…";
 }
 
-function getActiveUserClient(): SafeUser | null {
-  return getActiveUser();
-}
-function getActiveUserServer(): SafeUser | null {
-  return null;
-}
-
 export default function ScreeningPage() {
   const [phase, setPhase] = useState<Phase>("questionnaire");
+  const [user, setUser] = useState<SafeUser | null>(null);
   const [consent, setConsent] = useState(false);
 
   // 4-Step Pre-Flight Integrity Checklist States
@@ -133,8 +127,9 @@ export default function ScreeningPage() {
   const trialsRef = useRef<Trial[]>([]);
   const activeTrialRef = useRef<Trial | null>(null);
 
-  // Use external store for active user to avoid cascading renders
-  const activeUserFromStore = useSyncExternalStore(subscribeAuth, getActiveUserClient, getActiveUserServer);
+  useEffect(() => {
+    setUser(getActiveUser());
+  }, []);
 
   const requestFullscreen = async () => {
     try {
@@ -473,9 +468,9 @@ export default function ScreeningPage() {
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
-          {activeUserFromStore ? (
+          {user ? (
             <Link className="text-link" href="/dashboard">
-              Dashboard ({activeUserFromStore.name.split(" ")[0]})
+              Dashboard ({user.name.split(" ")[0]})
             </Link>
           ) : (
             <Link className="text-link" href="/login">
@@ -1002,7 +997,7 @@ export default function ScreeningPage() {
             <button className="secondary-button" onClick={downloadJson}>
               Unduh Data Telemetri (.JSON)
             </button>
-            {activeUserFromStore && (
+            {user && (
               <Link className="secondary-button" href="/dashboard">
                 Lihat di Dashboard Histori
               </Link>
