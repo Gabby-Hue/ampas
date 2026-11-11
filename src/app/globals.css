@@ -39,14 +39,17 @@ button, input { font: inherit; }
 
 /* Layout Shells */
 .site-shell {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 24px;
   width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 clamp(16px, 3.5vw, 64px);
 }
 
 .screening-shell {
-  max-width: 980px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 clamp(16px, 3.5vw, 64px);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -119,7 +122,7 @@ button, input { font: inherit; }
     gap: 36px;
   }
 }
-.hero-copy { max-width: 580px; }
+.hero-copy { width: 100%; max-width: 760px; }
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -384,7 +387,7 @@ h1 em {
 }
 .cpt-topbar {
   width: 100%;
-  max-width: 640px;
+  max-width: 900px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -398,8 +401,8 @@ h1 em {
 }
 .cpt-stage-center {
   width: 100%;
-  max-width: 640px;
-  height: min(340px, 44vh);
+  max-width: 900px;
+  height: min(380px, 46vh);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -464,7 +467,7 @@ h1 em {
 /* Dual Trigger Touch Controls for Pad / Mobile */
 .trigger-zone-wrap {
   width: 100%;
-  max-width: 640px;
+  max-width: 900px;
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
