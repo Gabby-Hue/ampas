@@ -35,8 +35,8 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="site-shell" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <nav className="nav-wrap">
+    <main className="site-shell auth-page">
+      <nav className="nav-wrap" aria-label="Navigasi utama">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
@@ -47,128 +47,80 @@ export default function LoginPage() {
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
-          <Link className="text-link" href="/">
-            Beranda
-          </Link>
         </div>
       </nav>
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 0" }}>
-        <div className="hero-card" style={{ width: "100%", maxWidth: "420px" }}>
-          <div className="card-header">
-            <span>AUTENTIKASI // AKUN PENGGUNA</span>
-            <span className="badge-live">LOCAL SECURE</span>
-          </div>
-
-          <h1 style={{ fontSize: "1.8rem", margin: "20px 0 6px", color: "var(--text-primary)" }}>Masuk ke OculiCare</h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", margin: "0 0 24px", lineHeight: 1.5 }}>
-            Masuk untuk mengakses riwayat pengamatan fokus dan data rujukan sesi sebelumnya.
+      <div className="auth-grid">
+        <aside className="auth-aside">
+          <div className="eyebrow">Akun lokal</div>
+          <h1>
+            Catatan fokus yang bisa <em>dibawa ke konsultasi.</em>
+          </h1>
+          <p>
+            Masuk untuk menyimpan hasil penapisan, membandingkan sesi dari waktu ke waktu, dan
+            mengunduh ulang lembar rujukan tanpa mengulang tes.
           </p>
+          <ul className="auth-points">
+            <li>Riwayat sesi tersimpan di peramban ini, tanpa server database.</li>
+            <li>Setiap sesi menyimpan metrik agregat, bukan rekaman kamera.</li>
+            <li>Lembar rujukan A4 dapat dicetak ulang kapan saja dari dashboard.</li>
+          </ul>
+          <p className="auth-note">
+            Data akun disimpan dengan localStorage pada perangkat ini. Jangan gunakan akun ini untuk
+            data pasien nyata pada perangkat bersama.
+          </p>
+        </aside>
+
+        <section className="auth-panel" aria-labelledby="login-title">
+          <div className="status-pill">
+            <span className="status-dot" />
+            Masuk
+          </div>
+          <h2 id="login-title">Selamat datang kembali</h2>
+          <p>Gunakan email dan kata sandi yang Anda daftarkan di perangkat ini.</p>
 
           {error && (
-            <div
-              style={{
-                background: "rgba(248, 81, 73, 0.12)",
-                border: "1px solid rgba(248, 81, 73, 0.3)",
-                color: "var(--coral-danger)",
-                padding: "10px 14px",
-                borderRadius: "8px",
-                fontSize: "0.82rem",
-                marginBottom: "18px",
-              }}
-            >
+            <div className="form-error" role="alert">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div>
-              <label
-                htmlFor="email"
-                style={{
-                  display: "block",
-                  fontSize: "0.78rem",
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                EMAIL
-              </label>
+          <form onSubmit={handleSubmit}>
+            <div className="field">
+              <label htmlFor="email">Email</label>
               <input
                 id="email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nama@email.com"
-                style={{
-                  width: "100%",
-                  height: "42px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--surface-border)",
-                  borderRadius: "8px",
-                  padding: "0 12px",
-                  color: "var(--text-primary)",
-                  fontSize: "0.88rem",
-                }}
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="password"
-                style={{
-                  display: "block",
-                  fontSize: "0.78rem",
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                PASSWORD
-              </label>
+            <div className="field">
+              <label htmlFor="password">Kata sandi</label>
               <input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Minimal 6 karakter"
-                style={{
-                  width: "100%",
-                  height: "42px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--surface-border)",
-                  borderRadius: "8px",
-                  padding: "0 12px",
-                  color: "var(--text-primary)",
-                  fontSize: "0.88rem",
-                }}
               />
             </div>
 
-            <button type="submit" disabled={loading} className="primary-button" style={{ width: "100%", marginTop: "8px" }}>
-              {loading ? "Memverifikasi…" : "Masuk ke Dashboard →"}
+            <button type="submit" disabled={loading} className="primary-button" style={{ width: "100%", marginTop: 4 }}>
+              {loading ? "Memverifikasi..." : "Masuk ke dashboard"}
             </button>
           </form>
 
-          <div
-            style={{
-              marginTop: "20px",
-              paddingTop: "16px",
-              borderTop: "1px solid var(--surface-border)",
-              textAlign: "center",
-              fontSize: "0.82rem",
-              color: "var(--text-muted)",
-            }}
-          >
-            Belum punya akun?{" "}
-            <Link href="/register" style={{ color: "var(--accent-teal)", fontWeight: 600 }}>
-              Daftar sekarang
-            </Link>
-          </div>
-        </div>
+          <p className="auth-alt">
+            Belum punya akun? <Link href="/register">Daftar sekarang</Link>
+          </p>
+        </section>
       </div>
     </main>
   );

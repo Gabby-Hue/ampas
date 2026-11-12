@@ -81,7 +81,7 @@ function printSessionReport(entry: SessionHistoryEntry): void {
 </head>
 <body>
   <h1>Lembar Rujukan Penapisan Atensi</h1>
-  <div class="muted">OculiCare NeuroFocus · Tes versi 2.1</div>
+  <div class="muted">OculiCare NeuroFocus, tes versi 2.1</div>
   <div class="rule"></div>
   <table>
     <tr><th>ID Sesi (anonim)</th><td>${escapeHtml(entry.sessionId)}</td></tr>
@@ -143,7 +143,7 @@ export default function DashboardPage() {
   if (!isReady || !user) {
     return (
       <main className="site-shell" style={{ padding: "80px 0", textAlign: "center", color: "var(--text-muted)" }}>
-        Memverifikasi akun pengguna…
+        Memverifikasi akun pengguna...
       </main>
     );
   }
@@ -151,9 +151,8 @@ export default function DashboardPage() {
   const trends = calculateUserTrends(sessions);
 
   return (
-    <main className="site-shell" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Navigation */}
-      <nav className="nav-wrap">
+    <main className="site-shell">
+      <nav className="nav-wrap" aria-label="Navigasi utama">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
@@ -161,198 +160,136 @@ export default function DashboardPage() {
         <div className="nav-center-menu">
           <Link href="/">Beranda</Link>
           <Link href="/screening">Mulai Tes</Link>
-          <span className="status-pill" style={{ padding: "3px 8px", fontSize: "0.68rem" }}>
-            DASHBOARD TERKUNCI
-          </span>
+          <Link href="/dashboard">Dashboard</Link>
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
           <ProfileIconButton user={user} />
-          <button
-            type="button"
-            className="secondary-button"
-            style={{ padding: "6px 14px", fontSize: "0.78rem" }}
-            onClick={handleLogout}
-          >
-            Keluar Akun
-          </button>
         </div>
       </nav>
 
-      {/* Dashboard Header */}
-      <div style={{ padding: "32px 0 24px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
-        <div
-          className="icon-circle-btn"
-          style={{ width: "60px", height: "60px", cursor: "default", borderColor: "var(--accent-teal)", color: "var(--accent-teal)" }}
-          aria-hidden="true"
-        >
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-        </div>
+      <header className="page-header">
         <div>
-          <div className="status-pill">
-            <span className="status-dot" /> Akun Terverifikasi Lokal
-          </div>
-          <h1 style={{ fontSize: "2.1rem", margin: "10px 0 6px", color: "var(--text-primary)" }}>
-            Selamat datang, <em>{user.name}</em>
+          <div className="eyebrow">Dashboard riwayat</div>
+          <h1>
+            Halo, <em>{user.name}</em>.
           </h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.92rem", margin: 0 }}>
-            {user.email} · Terdaftar sejak {new Date(user.createdAt).toLocaleDateString("id-ID", { dateStyle: "long" })}
+          <p>
+            {user.email} · Terdaftar sejak{" "}
+            {new Date(user.createdAt).toLocaleDateString("id-ID", { dateStyle: "long" })}
           </p>
         </div>
-      </div>
-
-      {/* 3 Metric Summary Cards */}
-      <div className="results-grid-cards">
-        <div className="result-card">
-          <div>
-            <div className="result-card-title">TOTAL SESI PENAPISAN</div>
-            <div className="result-card-value">{trends.totalCompleted} Sesi</div>
-            <div className="result-card-desc">Jumlah tes Continuous Performance Task yang telah diselesaikan.</div>
-          </div>
-          <div style={{ marginTop: "16px" }}>
-            <Link
-              className="primary-button"
-              style={{ width: "100%", padding: "10px 16px", fontSize: "0.82rem" }}
-              href="/screening"
-            >
-              Mulai Sesi Baru →
-            </Link>
-          </div>
+        <div className="page-header-actions">
+          <Link className="primary-button" href="/screening">
+            Mulai sesi baru
+          </Link>
+          <button type="button" className="secondary-button" onClick={handleLogout}>
+            Keluar
+          </button>
         </div>
+      </header>
 
-        <div className="result-card">
-          <div>
-            <div className="result-card-title">RATA-RATA REACTION TIME</div>
-            <div className="result-card-value">{trends.avgMedianRt} ms</div>
-            <div className="result-card-desc">
-              Kecepatan rata-rata memproses dan merespons stimulus visual sepanjang sesi tes.
-            </div>
+      <section className="stat-strip" aria-label="Ringkasan performa">
+        <div className="stat-cell">
+          <div className="stat-label">Sesi selesai</div>
+          <div className="stat-value">
+            {trends.totalCompleted} <small>sesi</small>
           </div>
-          <div style={{ marginTop: "16px", fontSize: "0.78rem", color: "var(--accent-teal)", fontFamily: "var(--font-mono)" }}>
-            Rentang optimal: 320 s.d. 450 ms
-          </div>
+          <div className="stat-note">Jumlah tes Continuous Performance Task yang tersimpan.</div>
         </div>
-
-        <div className="result-card">
-          <div>
-            <div className="result-card-title">KONSISTENSI GO ACCURACY</div>
-            <div className="result-card-value">{Math.round(trends.avgHitRate * 100)}%</div>
-            <div className="result-card-desc">
-              Persentase keberhasilan menekan target hijau tepat waktu tanpa terlewat.
-            </div>
+        <div className="stat-cell">
+          <div className="stat-label">Rata-rata median RT</div>
+          <div className="stat-value">
+            {trends.avgMedianRt} <small>ms</small>
           </div>
-          <div style={{ marginTop: "16px", fontSize: "0.78rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            {trends.avgHitRate >= 0.85 ? "Konsistensi Atensi Baik" : "Fluktuasi Terdeteksi"}
-          </div>
+          <div className="stat-note">Kecepatan rata-rata merespons stimulus visual antar sesi.</div>
         </div>
-      </div>
+        <div className="stat-cell">
+          <div className="stat-label">Konsistensi akurasi Go</div>
+          <div className="stat-value">
+            {Math.round(trends.avgHitRate * 100)}
+            <small>%</small>
+          </div>
+          <div className="stat-note">Persentase target hijau yang ditekan tepat waktu.</div>
+        </div>
+      </section>
 
-      {/* Session History Table */}
-      <section style={{ padding: "16px 0 48px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>
-            Riwayat Penapisan & Lembar Rujukan
-          </h2>
-          <span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            {sessions.length} CATATAN TERSIMPAN
+      <section className="history-section">
+        <div className="history-head">
+          <h2>Riwayat penapisan</h2>
+          <span className="history-count">
+            {sessions.length} catatan tersimpan
           </span>
         </div>
 
         {sessions.length === 0 ? (
-          <div
-            className="hero-card"
-            style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-secondary)" }}
-          >
-            <div
-              className="icon-circle-btn"
-              style={{ width: "52px", height: "52px", margin: "0 auto 14px", cursor: "default", color: "var(--accent-teal)" }}
-              aria-hidden="true"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="18" y1="20" x2="18" y2="10" />
-                <line x1="12" y1="20" x2="12" y2="4" />
-                <line x1="6" y1="20" x2="6" y2="14" />
-              </svg>
-            </div>
-            <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
-              Belum ada riwayat sesi
-            </h3>
-            <p style={{ fontSize: "0.85rem", maxWidth: "420px", margin: "0 auto 20px", lineHeight: 1.5 }}>
-              Jalankan sesi penapisan atensi pertamamu untuk mulai merekam data performa dan mengunduh lembar rujukan.
+          <div className="empty-state">
+            <h3>Belum ada riwayat sesi</h3>
+            <p>
+              Jalankan penapisan pertama untuk mulai merekam metrik performa dan mengunduh lembar
+              rujukan. Hasil akan otomatis muncul di sini setelah sesi selesai.
             </p>
             <Link className="primary-button" href="/screening">
-              Jalankan Tes Sekarang →
+              Jalankan tes sekarang
             </Link>
           </div>
         ) : (
-          <div
-            style={{
-              overflowX: "auto",
-              border: "1px solid var(--surface-border)",
-              borderRadius: "12px",
-              background: "var(--surface)",
-            }}
-          >
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", textAlign: "left" }}>
+          <div className="data-table-wrap">
+            <table className="data-table">
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--surface-border)", background: "var(--surface-elevated)" }}>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>ID Sesi</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Tanggal</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Skor WHO ASRS</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Median RT</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Akurasi Go</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Salah Pencet</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Status Gaze</th>
-                  <th style={{ padding: "12px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Aksi</th>
+                <tr>
+                  <th>ID sesi</th>
+                  <th>Tanggal</th>
+                  <th>WHO ASRS</th>
+                  <th>Median RT</th>
+                  <th>Akurasi Go</th>
+                  <th>Salah pencet</th>
+                  <th>Status gaze</th>
+                  <th style={{ textAlign: "right" }}>Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {sessions.map((s, idx) => (
-                  <tr
-                    key={s.sessionId || idx}
-                    style={{ borderBottom: idx === sessions.length - 1 ? "none" : "1px solid var(--surface-border-subtle)" }}
-                  >
-                    <td style={{ padding: "12px 16px", fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--accent-teal)" }}>
+                  <tr key={s.sessionId || idx}>
+                    <td className="cell-id" data-label="ID sesi">
                       {s.sessionId}
                     </td>
-                    <td style={{ padding: "12px 16px", color: "var(--text-secondary)" }}>
+                    <td data-label="Tanggal">
                       {new Date(s.date).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })}
                     </td>
-                    <td style={{ padding: "12px 16px", color: "var(--text-primary)" }}>
+                    <td data-label="WHO ASRS">
                       {s.asrsTotalScore}/24{" "}
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          color: s.asrsSignificant ? "var(--coral-danger)" : "var(--accent-teal)",
-                          fontWeight: 600,
-                        }}
-                      >
-                        ({s.asrsSignificant ? "Signifikan" : "Normal"})
+                      <span style={{ marginLeft: 4, color: s.asrsSignificant ? "var(--danger)" : "var(--success)", fontSize: "0.74rem" }}>
+                        {s.asrsSignificant ? "Signifikan" : "Normal"}
                       </span>
                     </td>
-                    <td style={{ padding: "12px 16px", fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    <td className="cell-num" data-label="Median RT">
                       {s.medianRtMs ?? "-"} ms
                     </td>
-                    <td style={{ padding: "12px 16px", fontFamily: "var(--font-mono)", color: "var(--text-primary)" }}>
+                    <td className="cell-num" data-label="Akurasi Go">
                       {Math.round(s.hitRate * 100)}%
                     </td>
-                    <td style={{ padding: "12px 16px", color: s.commissions > 0 ? "var(--coral-danger)" : "var(--text-muted)" }}>
-                      {s.commissions} Kali
+                    <td data-label="Salah pencet" style={{ color: s.commissions > 0 ? "var(--danger)" : "var(--text-muted)" }}>
+                      {s.commissions} kali
                     </td>
-                    <td style={{ padding: "12px 16px", color: "var(--text-muted)" }}>
-                      <span className="status-pill" style={{ fontSize: "0.68rem", padding: "2px 8px" }}>
+                    <td data-label="Status gaze">
+                      <span
+                        className={`status-tag ${
+                          s.gazeStatus === "usable"
+                            ? ""
+                            : s.gazeStatus === "unavailable"
+                            ? "is-danger"
+                            : "is-warning"
+                        }`}
+                      >
                         {s.gazeStatus}
                       </span>
                     </td>
-                    <td style={{ padding: "12px 16px" }}>
-                      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                    <td className="cell-actions">
+                      <div className="table-actions">
                         <button
                           type="button"
                           className="secondary-button"
-                          style={{ padding: "4px 10px", fontSize: "0.72rem" }}
                           onClick={() => printSessionReport(s)}
                         >
                           PDF
@@ -360,7 +297,6 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           className="secondary-button"
-                          style={{ padding: "4px 10px", fontSize: "0.72rem" }}
                           onClick={() => downloadSessionJson(s)}
                         >
                           JSON
@@ -374,6 +310,14 @@ export default function DashboardPage() {
           </div>
         )}
       </section>
+
+      <footer className="site-footer">
+        <div>
+          <strong>OculiCare NeuroFocus</strong>
+          <div>Ringkasan penapisan performa, bukan diagnosis medis.</div>
+        </div>
+        <div>{sessions.length} sesi tersimpan di perangkat ini.</div>
+      </footer>
     </main>
   );
 }

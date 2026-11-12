@@ -8,32 +8,32 @@ import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
 
 const conditions = [
   {
-    code: "DIAGNOSTIC CRITERIA 1",
+    code: "Spektrum 01",
     name: "ADHD Tipe Inatentif",
     sub: "Predominantly Inattentive Presentation (DSM-5 314.00)",
-    symptoms: "Sering melamun (mind-wandering), kesulitan mempertahankan fokus pada materi monoton, mudah teralihkan rangsangan eksternal, dan kerap melupakan instruksi harian.",
-    cptCorrelation: "Tercermin dari tingginya Omission Error (target hijau terlewat) dan variabilitas waktu reaksi (RTV) yang lebar.",
+    symptoms: "Sering melamun, kesulitan mempertahankan fokus pada materi monoton, mudah teralihkan rangsangan eksternal, dan kerap melupakan instruksi harian.",
+    cptCorrelation: "Omission error tinggi (target hijau terlewat) dan variabilitas waktu reaksi yang lebar.",
   },
   {
-    code: "DIAGNOSTIC CRITERIA 2",
+    code: "Spektrum 02",
     name: "ADHD Tipe Hiperaktif-Impulsif",
     sub: "Predominantly Hyperactive-Impulsive (DSM-5 314.01)",
-    symptoms: "Refleks motorik bergerak sebelum otak sadar mengevaluasi, ketidaksabaran saat menunggu giliran, kecenderungan menyela, dan gelisah motorik.",
-    cptCorrelation: "Tercermin dari tingginya Commission Error (keliru menekan target merah yang seharusnya ditahan).",
+    symptoms: "Refleks motorik bergerak sebelum otak sadar mengevaluasi, tidak sabar menunggu giliran, cenderung menyela, dan gelisah motorik.",
+    cptCorrelation: "Commission error tinggi, yaitu keliru menekan target merah yang seharusnya ditahan.",
   },
   {
-    code: "NEURO-FATIGUE 3",
-    name: "Digital Attention Fatigue & Brain Fog",
+    code: "Spektrum 03",
+    name: "Digital Attention Fatigue",
     sub: "Acquired Attention Fragmentation (Kelelahan Layar Akut)",
-    symptoms: "Penurunan tajam kecepatan pemrosesan informasi setelah konsumsi konten video cepat (<60 detik) atau multitasking gawai berkepanjangan.",
-    cptCorrelation: "Tercermin dari kurva atensi yang anjlok drastis pada paruh kedua pengujian (Vigilance Decrement).",
+    symptoms: "Penurunan tajam kecepatan pemrosesan setelah konsumsi video pendek di bawah 60 detik atau multitasking gawai berkepanjangan.",
+    cptCorrelation: "Kurva atensi anjlok pada paruh kedua pengujian (vigilance decrement).",
   },
   {
-    code: "LIFESTYLE CO-FACTOR 4",
+    code: "Spektrum 04",
     name: "Cognitive Burnout & Sleep-Debt",
     sub: "Reversible Executive Dysfunction",
-    symptoms: "Beban kerja tinggi atau defisit jam tidur yang meniru keluhan defisit konsentrasi namun dapat pulih setelah istirahat teratur.",
-    cptCorrelation: "Tercermin dari waktu reaksi yang melambat secara menyeluruh (Median RT lambat > 500 ms) disertai dispersi fiksasi tatapan mata.",
+    symptoms: "Beban kerja tinggi atau defisit jam tidur yang meniru keluhan defisit konsentrasi, namun dapat pulih setelah istirahat teratur.",
+    cptCorrelation: "Median reaction time melambat menyeluruh (di atas 500 ms) disertai dispersi fiksasi tatapan.",
   },
 ];
 
@@ -41,28 +41,30 @@ const comparisonData = [
   {
     condition: "ADHD Inatentif",
     dailySign: "Tugas terbengkalai, sering lupa, melamun",
-    cptSign: "Omission Error Tinggi (>25%), RTV Lebar",
+    cptSign: "Omission error tinggi (>25%), RTV lebar",
     gazeSign: "Fiksasi mata mudah keluar dari area target",
   },
   {
     condition: "ADHD Impulsif",
     dailySign: "Spontan, terburu-buru, refleks tak terkontrol",
-    cptSign: "Commission Error Tinggi (>30%), Respon Prematur",
+    cptSign: "Commission error tinggi (>30%), respons prematur",
     gazeSign: "Tatapan reaktif sebelum stimulus stabil",
   },
   {
     condition: "Digital Brain Fog",
-    dailySign: "Kepala terasa berat, sulit fokus setelah scrolling HP",
-    cptSign: "Penurunan akurasi tajam di blok akhir (B5-B6)",
+    dailySign: "Kepala berat, sulit fokus setelah menggulir layar",
+    cptSign: "Akurasi turun tajam di blok akhir (B5-B6)",
     gazeSign: "Kelelahan otot foveal, kedipan melambat",
   },
   {
     condition: "Kelelahan Kurang Tidur",
     dailySign: "Mengantuk, reaksi lamban, konsentrasi tumpul",
-    cptSign: "Median Reaction Time melambat signifikan (>500 ms)",
+    cptSign: "Median reaction time melambat (>500 ms)",
     gazeSign: "Penutupan kelopak parsial, pergerakan iris lambat",
   },
 ];
+
+const focusCurve = [96, 92, 88, 85, 75, 68];
 
 export default function Home() {
   const [user, setUser] = useState<SafeUser | null>(null);
@@ -73,17 +75,16 @@ export default function Home() {
 
   return (
     <main className="site-shell">
-      {/* Navigation */}
       <nav className="nav-wrap" aria-label="Navigasi utama">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
         <div className="nav-center-menu">
-          <a href="#spektrum-kondisi">Spektrum Gangguan</a>
-          <a href="#matriks-komparasi">Matriks Triangulasi</a>
+          <a href="#spektrum-kondisi">Spektrum</a>
+          <a href="#matriks-komparasi">Matriks</a>
           <a href="#cara-kerja">Cara Kerja</a>
-          <a href="#privasi">Privasi & Etika</a>
+          <a href="#privasi">Privasi</a>
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
@@ -94,196 +95,169 @@ export default function Home() {
               <Link className="text-link" href="/login">
                 Masuk
               </Link>
-              <Link className="primary-button" style={{ padding: "8px 16px", fontSize: "0.8rem" }} href="/register">
-                Daftar Akun
+              <Link className="primary-button nav-cta" href="/register">
+                Buat Akun
               </Link>
             </>
           )}
         </div>
       </nav>
 
-      {/* Hero Section */}
       <section className="hero-section">
         <div className="hero-copy">
-          <div className="status-pill">
-            <span className="status-dot" /> Subtema 4: Inclusive Health & Well-being
-          </div>
+          <div className="eyebrow">Subtema 4, Inclusive Health &amp; Well-being</div>
           <h1>
-            Pahami batas <em>stamina fokusmu.</em> Secara objektif.
+            Pahami batas <em>stamina fokusmu</em>, secara objektif.
           </h1>
           <p className="hero-lede">
-            Platform penapisan awal performa atensi dan triase neurobehavioral. Mengintegrasikan Continuous Performance
-            Task (CPT) Go/No-Go terstandar, pelacakan okulomotorik on-device, dan kuesioner baku WHO ASRS v1.1.
+            Penapisan awal performa atensi yang menggabungkan Continuous Performance Task Go/No-Go,
+            pelacakan okulomotorik on-device, dan kuesioner baku WHO ASRS v1.1. Hasilnya berupa
+            ringkasan terukur untuk dibawa ke konsultasi profesional.
           </p>
           <div className="hero-actions">
             <Link className="primary-button" href="/screening">
-              Mulai Penapisan Terstandar (6 Menit / Mode Cepat) <span>→</span>
+              Mulai Penapisan
             </Link>
             {user ? (
               <Link className="secondary-button" href="/dashboard">
-                Lihat Histori Dashboard
+                Lihat Riwayat Sesi
               </Link>
             ) : (
               <Link className="secondary-button" href="/login">
-                Masuk Untuk Simpan Riwayat
+                Masuk untuk Simpan Riwayat
               </Link>
             )}
           </div>
-          <p style={{ marginTop: "16px", fontSize: "0.74rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-            Instrumen Triase Awal (Termometer Atensi) · Bebas Biaya · 100% Pemrosesan Lokal Aman
+          <p className="hero-meta">
+            Tes 6 menit atau mode cepat, tanpa biaya, 100% diproses di peramban. Bukan alat diagnosis.
           </p>
         </div>
 
-        {/* Live Interactive Telemetry Card */}
-        <div className="hero-card">
+        <aside className="hero-card" aria-label="Contoh keluaran sesi penapisan">
           <div className="card-header">
-            <span>OKULOMOTORIK & REAKSI MOTORIK</span>
-            <span className="badge-live">LIVE WASM TRACK</span>
+            <span>Contoh keluaran sesi</span>
+            <span className="badge-live">Data sintetis</span>
           </div>
 
-          <div style={{ margin: "16px 0 12px" }}>
-            <div className="interactive-radar-canvas" aria-label="Simulasi radar fiksasi tatapan mata">
-              <div className="radar-ring radar-ring-3" />
-              <div className="radar-ring radar-ring-2" />
-              <div className="radar-ring radar-ring-1" />
-              <div className="radar-sweep" />
-              <div className="radar-blip" style={{ top: "42%", left: "54%" }} />
-              <div className="radar-blip" style={{ top: "52%", left: "47%", opacity: 0.6 }} />
-              <div className="radar-blip" style={{ top: "46%", left: "50%", opacity: 0.9 }} />
-              <div style={{ position: "absolute", bottom: "8px", left: "10px", fontSize: "0.68rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)" }}>
-                FIKSASI PUPIL 30Hz: STABIL
-              </div>
-            </div>
+          <div className="interactive-radar-canvas" aria-label="Ilustrasi peta fiksasi tatapan mata">
+            <div className="radar-ring radar-ring-3" />
+            <div className="radar-ring radar-ring-2" />
+            <div className="radar-ring radar-ring-1" />
+            <div className="radar-sweep" />
+            <div className="radar-blip" style={{ top: "42%", left: "54%" }} />
+            <div className="radar-blip" style={{ top: "52%", left: "47%", opacity: 0.6 }} />
+            <div className="radar-blip" style={{ top: "46%", left: "50%", opacity: 0.9 }} />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", margin: "14px 0" }}>
-            <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "8px", border: "1px solid var(--surface-border)" }}>
-              <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                MEDIAN REACTION TIME
+          <div className="readout-grid">
+            <div className="readout">
+              <div className="readout-label">Median RT</div>
+              <div className="readout-value">
+                384 <span>ms</span>
               </div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)", margin: "2px 0" }}>
-                384 <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 500 }}>ms</span>
+              <div className="readout-note">
+                <strong>Dalam rentang</strong> sesi tenang
               </div>
-              <span style={{ fontSize: "0.72rem", color: "var(--accent-teal)", fontWeight: 600 }}>Rentang Optimal</span>
             </div>
-
-            <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "8px", border: "1px solid var(--surface-border)" }}>
-              <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                MOTOR INHIBITION
+            <div className="readout">
+              <div className="readout-label">Inhibisi motor</div>
+              <div className="readout-value">86,4%</div>
+              <div className="readout-note">
+                <strong>Penolakan benar</strong> target merah
               </div>
-              <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)", margin: "2px 0" }}>
-                86.4%
-              </div>
-              <span style={{ fontSize: "0.72rem", color: "var(--accent-teal)", fontWeight: 600 }}>Correct Rejection</span>
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid var(--surface-border)", paddingTop: "14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", color: "var(--text-secondary)", marginBottom: "8px" }}>
-              <span>Kurva Ketahanan Fokus 6 Blok (6 Menit)</span>
-              <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent-teal)" }}>Blok 1 → Blok 6</span>
+          <div>
+            <div className="curve-caption">
+              <span>Kurva ketahanan fokus, 6 blok</span>
+              <span>Blok 1 ke 6</span>
             </div>
-            <div style={{ height: "40px", display: "flex", alignItems: "end", gap: "6px" }}>
-              {[96, 92, 88, 85, 75, 68].map((v, i) => (
-                <div key={i} style={{ flex: 1, height: "100%", display: "flex", alignItems: "end" }}>
-                  <div
-                    style={{
-                      width: "100%",
-                      height: `${v}%`,
-                      background: "linear-gradient(180deg, var(--accent-teal) 0%, rgba(16, 185, 129, 0.25) 100%)",
-                      borderRadius: "3px 3px 0 0",
-                    }}
-                  />
-                </div>
+            <div className="mini-bars" aria-hidden="true">
+              {focusCurve.map((value, index) => (
+                <span key={index} style={{ height: `${Math.round(value * 0.5)}px` }} />
               ))}
             </div>
+            <p className="specimen-note">
+              Visual contoh, bukan hasil pengguna. Metrik sebenarnya dihitung dari respons dan kualitas sensor sesi Anda.
+            </p>
           </div>
-        </div>
+        </aside>
       </section>
 
-      {/* Trust Strip */}
-      <section className="trust-strip" id="privasi">
-        <span>PRIVACY-BY-DESIGN</span>
-        <span>•</span>
-        <span>ZERO VIDEO INGESTION</span>
-        <span>•</span>
-        <span>WHO ASRS v1.1 VALIDATED</span>
-        <span>•</span>
-        <span>DETERMINISTIC PSYCHOMETRICS</span>
+      <section className="trust-strip" id="privasi" aria-label="Prinsip produk">
+        <span>Privasi by design</span>
+        <span>Tidak ada video yang diunggah</span>
+        <span>WHO ASRS v1.1 tervalidasi</span>
+        <span>Psikometri deterministik</span>
       </section>
 
-      {/* 4 Conditions Deep Dive */}
-      <section className="screening-content" id="spektrum-kondisi" style={{ padding: "64px 0" }}>
-        <div style={{ maxWidth: "780px", marginBottom: "36px" }}>
-          <div className="status-pill" style={{ marginBottom: "12px" }}>
-            Kajian Klinis Diferensial
+      <section className="section" id="spektrum-kondisi">
+        <div className="section-head">
+          <div>
+            <div className="status-pill">
+              <span className="status-dot" />
+              Kajian klinis diferensial
+            </div>
+            <h2>Empat spektrum di balik kesulitan konsentrasi.</h2>
           </div>
-          <h2 style={{ fontSize: "2.1rem", fontWeight: 700, margin: "0 0 14px", color: "var(--text-primary)" }}>
-            Kenali 4 spektrum yang mendasari gangguan konsentrasi.
-          </h2>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.95rem", lineHeight: 1.6 }}>
-            Sulit fokus bukanlah satu vonis tunggal. Gejala yang dialami sehari-hari dapat berakar dari faktor
-            neurobiologis bawaan maupun kelelahan gaya hidup digital. OculiCare memetakan perbedaannya secara terstruktur.
+          <p>
+            Sulit fokus bukan satu vonis tunggal. Gejala harian bisa berakar pada faktor neurobiologis
+            bawaan maupun kelelahan gaya hidup digital. OculiCare memetakan perbedaannya secara
+            terstruktur, tanpa menyimpulkan diagnosis.
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
-          {conditions.map((item, idx) => (
-            <article className="result-card" key={idx}>
+        <div className="spectrum-list">
+          {conditions.map((item, index) => (
+            <article className="spectrum-row" key={item.name}>
+              <div className="spectrum-index">{String(index + 1).padStart(2, "0")}</div>
               <div>
-                <div style={{ fontSize: "0.68rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
-                  {item.code}
-                </div>
-                <h3 style={{ fontSize: "1.15rem", fontWeight: 700, margin: "0 0 4px", color: "var(--text-primary)" }}>
-                  {item.name}
-                </h3>
-                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)", marginBottom: "12px" }}>
-                  {item.sub}
-                </div>
-                <p style={{ fontSize: "0.84rem", color: "var(--text-secondary)", lineHeight: 1.55, margin: "0 0 14px" }}>
-                  {item.symptoms}
-                </p>
+                <h3 className="spectrum-name">{item.name}</h3>
+                <p className="spectrum-sub">{item.sub}</p>
               </div>
-              <div style={{ borderTop: "1px solid var(--surface-border-subtle)", paddingTop: "12px", fontSize: "0.76rem", color: "var(--text-muted)" }}>
-                <strong style={{ color: "var(--text-primary)" }}>Deteksi di OculiCare: </strong>
+              <p className="spectrum-copy">{item.symptoms}</p>
+              <p className="spectrum-detect">
+                <strong>Jejak di tes</strong>
                 {item.cptCorrelation}
-              </div>
+              </p>
             </article>
           ))}
         </div>
       </section>
 
-      {/* Comparison Matrix Table */}
-      <section className="screening-content" id="matriks-komparasi" style={{ padding: "36px 0 64px" }}>
-        <div style={{ maxWidth: "780px", marginBottom: "28px" }}>
-          <div className="status-pill" style={{ marginBottom: "12px" }}>
-            Matriks Triangulasi
+      <section className="section" id="matriks-komparasi">
+        <div className="section-head">
+          <div>
+            <div className="status-pill">
+              <span className="status-dot" />
+              Matriks triangulasi
+            </div>
+            <h2>Gejala harian dibanding parameter tes.</h2>
           </div>
-          <h2 style={{ fontSize: "1.8rem", fontWeight: 700, margin: "0 0 12px", color: "var(--text-primary)" }}>
-            Perbandingan Gejala Harian vs Parameter Tes CPT
-          </h2>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.55 }}>
-            Bagaimana data perilaku nyata membedakan apakah kamu sedang lelah sesaat atau membutuhkan evaluasi profesional.
+          <p>
+            Bagaimana data perilaku nyata membantu membedakan kelelahan sesaat dari pola yang layak
+            dievaluasi bersama tenaga profesional.
           </p>
         </div>
 
-        <div style={{ overflowX: "auto", border: "1px solid var(--surface-border)", borderRadius: "12px", background: "var(--surface)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", textAlign: "left" }}>
+        <div className="matrix-wrap">
+          <table className="matrix-table">
             <thead>
-              <tr style={{ borderBottom: "1px solid var(--surface-border)", background: "var(--surface-elevated)" }}>
-                <th style={{ padding: "14px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Spektrum Kondisi</th>
-                <th style={{ padding: "14px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Gejala Harian Subjektif</th>
-                <th style={{ padding: "14px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Karakteristik Respon CPT</th>
-                <th style={{ padding: "14px 16px", color: "var(--text-primary)", fontWeight: 700 }}>Kestabilan Fiksasi Gaze</th>
+              <tr>
+                <th>Spektrum kondisi</th>
+                <th>Gejala harian subjektif</th>
+                <th>Karakteristik respons CPT</th>
+                <th>Kestabilan fiksasi gaze</th>
               </tr>
             </thead>
             <tbody>
-              {comparisonData.map((row, i) => (
-                <tr key={i} style={{ borderBottom: i === comparisonData.length - 1 ? "none" : "1px solid var(--surface-border-subtle)" }}>
-                  <td style={{ padding: "14px 16px", fontWeight: 700, color: "var(--accent-teal)" }}>{row.condition}</td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)" }}>{row.dailySign}</td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-secondary)" }}>{row.cptSign}</td>
-                  <td style={{ padding: "14px 16px", color: "var(--text-muted)" }}>{row.gazeSign}</td>
+              {comparisonData.map((row) => (
+                <tr key={row.condition}>
+                  <td>{row.condition}</td>
+                  <td data-label="Gejala harian">{row.dailySign}</td>
+                  <td data-label="Respons CPT">{row.cptSign}</td>
+                  <td data-label="Fiksasi gaze">{row.gazeSign}</td>
                 </tr>
               ))}
             </tbody>
@@ -291,82 +265,62 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Cara Kerja & Triangulasi Section */}
-      <section className="screening-content" id="cara-kerja" style={{ padding: "36px 0 64px" }}>
-        <div style={{ maxWidth: "780px", marginBottom: "28px" }}>
-          <div className="status-pill" style={{ marginBottom: "12px" }}>
-            Alur Penapisan Terstandar
-          </div>
-          <h2 style={{ fontSize: "1.8rem", fontWeight: 700, margin: "0 0 12px", color: "var(--text-primary)" }}>
-            Bagaimana OculiCare Mengamati Fokusmu dalam 3 Langkah
-          </h2>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.55 }}>
-            Dirancang dengan protokol lingkungan terkontrol, menjaga privasi on-device, dan menghasilkan lembar rujukan terukur.
-          </p>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "20px" }}>
-          <div className="result-card">
-            <div>
-              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
-                LANGKAH 01
-              </div>
-              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
-                Validasi Keluhan Kronis (WHO ASRS)
-              </h3>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                Enam pertanyaan saringan baku World Health Organization untuk memetakan apakah kesulitan konsentrasi terjadi secara persisten dalam 6 bulan terakhir.
-              </p>
+      <section className="section" id="cara-kerja">
+        <div className="process-grid">
+          <div className="process-intro">
+            <div className="status-pill" style={{ marginBottom: 16 }}>
+              <span className="status-dot" />
+              Alur penapisan terstandar
             </div>
+            <h2>Tiga lapis pengukuran, satu ringkasan.</h2>
+            <p>
+              Protokol lingkungan terkontrol, pemrosesan on-device, dan lembar rujukan yang bisa
+              dibaca dokter tanpa kehilangan konteks.
+            </p>
           </div>
 
-          <div className="result-card">
-            <div>
-              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
-                LANGKAH 02
+          <div className="process-list">
+            <article className="process-step">
+              <div>
+                <h3>Validasi keluhan kronis</h3>
+                <p>
+                  Enam pertanyaan saringan WHO ASRS v1.1 memetakan apakah kesulitan konsentrasi
+                  terjadi secara persisten dalam enam bulan terakhir.
+                </p>
               </div>
-              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
-                Tes CPT Dual-Paradigma (6 Blok)
-              </h3>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                Stimulus foveal kilat 250 milidetik menguji ketahanan fokus (blok monoton) hingga rem impulsivitas motorik selama 6 menit di lingkungan terkontrol.
-              </p>
-            </div>
-          </div>
-
-          <div className="result-card">
-            <div>
-              <div style={{ fontSize: "0.7rem", fontFamily: "var(--font-mono)", color: "var(--accent-teal)", fontWeight: 700, marginBottom: "4px" }}>
-                LANGKAH 03
+            </article>
+            <article className="process-step">
+              <div>
+                <h3>Continuous Performance Task</h3>
+                <p>
+                  Stimulus foveal 250 milidetik menguji ketahanan fokus pada blok monoton hingga
+                  kontrol impuls motorik, dengan metrik omission, commission, dan variabilitas waktu reaksi.
+                </p>
               </div>
-              <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
-                Lembar Rujukan Klinis Siap Cetak
-              </h3>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                Dapatkan dokumen rujukan PDF satu halaman A4 yang merangkum kurva kelelahan atensi, indeks kelengahan, dan catatan teknis untuk dokter atau psikolog.
-              </p>
-            </div>
+            </article>
+            <article className="process-step">
+              <div>
+                <h3>Lembar rujukan siap cetak</h3>
+                <p>
+                  Ringkasan A4 satu halaman berisi metrik, kualitas data, metodologi, dan keterbatasan
+                  untuk dibawa ke psikolog atau psikiater.
+                </p>
+              </div>
+            </article>
           </div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer
-        style={{
-          borderTop: "1px solid var(--surface-border-subtle)",
-          padding: "24px 0 36px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "12px",
-          fontSize: "0.78rem",
-          color: "var(--text-muted)",
-          fontFamily: "var(--font-mono)",
-        }}
-      >
-        <span>OCULICARE NEUROFOCUS // LOGICODIX 2026 EDITION</span>
-        <span>INSTRUMEN SKRINING AWAL · BUKAN DIAGNOSIS MEDIS</span>
+      <footer className="site-footer">
+        <div>
+          <strong>OculiCare NeuroFocus</strong>
+          <div>LOGICODIX 2026, instrumen skrining awal, bukan diagnosis medis.</div>
+        </div>
+        <div>
+          <Link className="text-link" href="/screening">
+            Mulai penapisan
+          </Link>
+        </div>
       </footer>
     </main>
   );

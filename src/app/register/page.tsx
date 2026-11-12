@@ -37,8 +37,8 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="site-shell" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <nav className="nav-wrap">
+    <main className="site-shell auth-page">
+      <nav className="nav-wrap" aria-label="Navigasi utama">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
@@ -49,161 +49,93 @@ export default function RegisterPage() {
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
-          <Link className="text-link" href="/">
-            Beranda
-          </Link>
         </div>
       </nav>
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 0" }}>
-        <div className="hero-card" style={{ width: "100%", maxWidth: "440px" }}>
-          <div className="card-header">
-            <span>REGISTRASI // AKUN PENGGUNA BARU</span>
-            <span className="badge-live">DATA PRIVACY</span>
-          </div>
-
-          <h1 style={{ fontSize: "1.8rem", margin: "20px 0 6px", color: "var(--text-primary)" }}>Daftar Akun OculiCare</h1>
-          <p style={{ color: "var(--text-secondary)", fontSize: "0.85rem", margin: "0 0 24px", lineHeight: 1.5 }}>
-            Buat akun untuk memantau perkembangan stamina atensi dan menyimpan riwayat rujukan mandiri.
+      <div className="auth-grid">
+        <aside className="auth-aside">
+          <div className="eyebrow">Akun baru</div>
+          <h1>
+            Satu tempat untuk <em>jejak fokus</em> Anda.
+          </h1>
+          <p>
+            Akun menyimpan riwayat penapisan secara lokal sehingga Anda dapat membandingkan sesi,
+            melihat perubahan stamina atensi, dan mencetak ulang lembar rujukan.
           </p>
+          <ul className="auth-points">
+            <li>Gratis, tanpa verifikasi email, dan dapat dipakai offline.</li>
+            <li>Nama, email, dan kata sandi tidak dikirim ke server mana pun.</li>
+            <li>Anda dapat menghapus riwayat kapan saja dari peramban ini.</li>
+          </ul>
+          <p className="auth-note">
+            Kata sandi disimpan sebagai hash lokal untuk demo. Untuk penggunaan klinis nyata,
+            gunakan penyedia autentikasi dengan enkripsi server.
+          </p>
+        </aside>
+
+        <section className="auth-panel" aria-labelledby="register-title">
+          <div className="status-pill">
+            <span className="status-dot" />
+            Registrasi
+          </div>
+          <h2 id="register-title">Buat akun OculiCare</h2>
+          <p>Isi data berikut untuk mulai menyimpan hasil penapisan di perangkat ini.</p>
 
           {error && (
-            <div
-              style={{
-                background: "rgba(248, 81, 73, 0.12)",
-                border: "1px solid rgba(248, 81, 73, 0.3)",
-                color: "var(--coral-danger)",
-                padding: "10px 14px",
-                borderRadius: "8px",
-                fontSize: "0.82rem",
-                marginBottom: "18px",
-              }}
-            >
+            <div className="form-error" role="alert">
               {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div>
-              <label
-                htmlFor="name"
-                style={{
-                  display: "block",
-                  fontSize: "0.78rem",
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                NAMA LENGKAP
-              </label>
+          <form onSubmit={handleSubmit}>
+            <div className="field">
+              <label htmlFor="name">Nama lengkap</label>
               <input
                 id="name"
                 type="text"
+                autoComplete="name"
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Misal: Budi Santoso"
-                style={{
-                  width: "100%",
-                  height: "42px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--surface-border)",
-                  borderRadius: "8px",
-                  padding: "0 12px",
-                  color: "var(--text-primary)",
-                  fontSize: "0.88rem",
-                }}
+                placeholder="Nama yang tampil di dashboard"
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="email"
-                style={{
-                  display: "block",
-                  fontSize: "0.78rem",
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                EMAIL
-              </label>
+            <div className="field">
+              <label htmlFor="email">Email</label>
               <input
                 id="email"
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nama@email.com"
-                style={{
-                  width: "100%",
-                  height: "42px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--surface-border)",
-                  borderRadius: "8px",
-                  padding: "0 12px",
-                  color: "var(--text-primary)",
-                  fontSize: "0.88rem",
-                }}
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="password"
-                style={{
-                  display: "block",
-                  fontSize: "0.78rem",
-                  fontFamily: "var(--font-mono)",
-                  color: "var(--text-muted)",
-                  marginBottom: "6px",
-                }}
-              >
-                PASSWORD
-              </label>
+            <div className="field">
+              <label htmlFor="password">Kata sandi</label>
               <input
                 id="password"
                 type="password"
+                autoComplete="new-password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Minimal 6 karakter"
-                style={{
-                  width: "100%",
-                  height: "42px",
-                  background: "var(--surface-elevated)",
-                  border: "1px solid var(--surface-border)",
-                  borderRadius: "8px",
-                  padding: "0 12px",
-                  color: "var(--text-primary)",
-                  fontSize: "0.88rem",
-                }}
               />
             </div>
 
-            <button type="submit" disabled={loading} className="primary-button" style={{ width: "100%", marginTop: "8px" }}>
-              {loading ? "Mendaftarkan…" : "Daftar & Masuk ke Dashboard →"}
+            <button type="submit" disabled={loading} className="primary-button" style={{ width: "100%", marginTop: 4 }}>
+              {loading ? "Mendaftarkan..." : "Daftar dan masuk"}
             </button>
           </form>
 
-          <div
-            style={{
-              marginTop: "20px",
-              paddingTop: "16px",
-              borderTop: "1px solid var(--surface-border)",
-              textAlign: "center",
-              fontSize: "0.82rem",
-              color: "var(--text-muted)",
-            }}
-          >
-            Sudah memiliki akun?{" "}
-            <Link href="/login" style={{ color: "var(--accent-teal)", fontWeight: 600 }}>
-              Masuk di sini
-            </Link>
-          </div>
-        </div>
+          <p className="auth-alt">
+            Sudah memiliki akun? <Link href="/login">Masuk di sini</Link>
+          </p>
+        </section>
       </div>
     </main>
   );

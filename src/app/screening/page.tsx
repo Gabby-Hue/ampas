@@ -725,12 +725,12 @@ export default function ScreeningPage() {
           <Link href="/">Beranda</Link>
           <span className="status-pill">
             {phase === "ready"
-              ? "PERSIAPAN & KALIBRASI"
+              ? "Persiapan dan kalibrasi"
               : phase === "questionnaire"
-              ? `SESI 1 · SOAL ${asrsStep + 1}/${ASRS_QUESTIONS.length}`
+              ? `Sesi 1, soal ${asrsStep + 1} dari ${ASRS_QUESTIONS.length}`
               : phase === "running"
-              ? `SESI 2 · BLOK ${currentBlockNumber}/${totalBlocksCount}`
-              : "RINGKASAN HASIL"}
+              ? `Sesi 2, blok ${currentBlockNumber} dari ${totalBlocksCount}`
+              : "Ringkasan hasil"}
           </span>
         </div>
         <div className="nav-right-actions">
@@ -750,9 +750,9 @@ export default function ScreeningPage() {
         <section className="lab-viewport">
           <div className="lab-frame">
             <div className="lab-header">
-              <span className="lab-tag">KUESIONER WHO ASRS v1.1</span>
+              <span className="lab-tag">Kuesioner WHO ASRS v1.1</span>
               <span className="lab-step-indicator">
-                SOAL {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
+                Soal {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
               </span>
             </div>
 
@@ -774,14 +774,14 @@ export default function ScreeningPage() {
               ))}
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "20px", borderTop: "1px solid var(--surface-border-subtle)" }}>
+            <div className="lab-footer">
               {asrsStep > 0 ? (
-                <button type="button" className="secondary-button" style={{ padding: "8px 18px", fontSize: "0.82rem" }} onClick={() => setAsrsStep((s) => Math.max(0, s - 1))}>
-                  ← Kembali
+                <button type="button" className="secondary-button" onClick={() => setAsrsStep((s) => Math.max(0, s - 1))}>
+                  Kembali
                 </button>
               ) : (
-                <button type="button" className="secondary-button" style={{ padding: "8px 18px", fontSize: "0.82rem" }} onClick={() => setPhase("ready")}>
-                  ← Persiapan
+                <button type="button" className="secondary-button" onClick={() => setPhase("ready")}>
+                  Kembali ke persiapan
                 </button>
               )}
 
@@ -789,21 +789,19 @@ export default function ScreeningPage() {
                 <button
                   type="button"
                   className="primary-button"
-                  style={{ padding: "8px 22px", fontSize: "0.84rem" }}
                   disabled={!currentAsrsAnswered}
                   onClick={() => setAsrsStep((s) => Math.min(ASRS_QUESTIONS.length - 1, s + 1))}
                 >
-                  Lanjut →
+                  Soal berikutnya
                 </button>
               ) : (
                 <button
                   type="button"
                   className="primary-button"
-                  style={{ padding: "8px 22px", fontSize: "0.84rem" }}
                   disabled={!currentAsrsAnswered}
                   onClick={finishSesi1AndStartCpt}
                 >
-                  Mulai Pengecekan CPT →
+                  Mulai pengecekan CPT
                 </button>
               )}
             </div>
@@ -816,26 +814,31 @@ export default function ScreeningPage() {
         <section className="lab-viewport">
           <div className="lab-frame">
             <div className="lab-header">
-              <span className="lab-tag">STANDARDISASI SENSOR &amp; KALIBRASI</span>
+              <span className="lab-tag">Langkah 1 dari 3, persiapan</span>
               <button
                 type="button"
                 className="secondary-button"
-                style={{ padding: "4px 10px", fontSize: "0.72rem", borderStyle: "dashed" }}
+                style={{ minHeight: 32, padding: "5px 12px", fontSize: "0.74rem" }}
                 onClick={() => loadBenchmark("stable")}
                 title="Muat data sampel untuk demonstrasi"
               >
-                Demo Benchmark
+                Muat data demo
               </button>
             </div>
+
+            <p className="lab-intro">
+              Tempelkan wajah di dalam lingkaran dan hadapkan ke sumber cahaya. Pembacaan iris
+              berlangsung di perangkat ini, dan video tidak pernah diunggah.
+            </p>
 
             {/* Circular Optical Reticle */}
             <div className="reticle-container">
               {cameraStatus === "ready" ? (
                 <video ref={videoRef} muted playsInline />
               ) : (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", textAlign: "center", padding: "16px" }}>
-                  <div style={{ fontSize: "1.6rem", marginBottom: "6px" }}>⊙</div>
-                  Kamera Standby
+                <div className="reticle-placeholder">
+                  <span className="reticle-hint-label">Kamera standby</span>
+                  <span className="reticle-hint-sub">Pusatkan wajah di dalam lingkaran</span>
                 </div>
               )}
               <div className="reticle-crosshair" />
@@ -850,10 +853,12 @@ export default function ScreeningPage() {
                       ? gaze.env.brightness >= 30
                         ? "active"
                         : "warning"
-                      : "danger"
+                      : cameraStatus === "denied"
+                      ? "danger"
+                      : ""
                   }`}
                 />
-                <span>CAHAYA</span>
+                <span>Cahaya</span>
               </div>
               <div className="sensor-item">
                 <span
@@ -862,96 +867,98 @@ export default function ScreeningPage() {
                       ? gaze.env.face.faceCentered
                         ? "active"
                         : "warning"
-                      : "danger"
+                      : cameraStatus === "denied"
+                      ? "danger"
+                      : ""
                   }`}
                 />
-                <span>JARAK</span>
+                <span>Jarak</span>
               </div>
               <div className="sensor-item">
                 <span
                   className={`sensor-dot-light ${
-                    cameraStatus === "ready" && gaze.status === "tracking" ? "active" : "danger"
+                    cameraStatus === "ready"
+                      ? gaze.status === "tracking"
+                        ? "active"
+                        : "warning"
+                      : cameraStatus === "denied"
+                      ? "danger"
+                      : ""
                   }`}
                 />
-                <span>MATA</span>
+                <span>Mata</span>
               </div>
             </div>
 
-            {/* Minimalist Controls */}
-            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "28px" }}>
+            {/* Camera controls */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "24px", flexWrap: "wrap" }}>
               {cameraStatus !== "ready" ? (
                 <button
                   type="button"
                   className="primary-button"
-                  style={{ padding: "9px 20px", fontSize: "0.82rem" }}
                   onClick={enableCamera}
                   disabled={cameraStatus === "starting"}
                 >
-                  {cameraStatus === "starting" ? "Menghubungkan…" : "Aktifkan Sensor Kamera"}
+                  {cameraStatus === "starting" ? "Menghubungkan..." : "Aktifkan sensor kamera"}
                 </button>
               ) : (
                 <button
                   type="button"
                   className="secondary-button"
-                  style={{ padding: "9px 20px", fontSize: "0.82rem" }}
                   onClick={stopCamera}
                 >
-                  Matikan Kamera
+                  Matikan kamera
                 </button>
               )}
               <button
                 type="button"
-                className={skipCamera ? "badge-live" : "secondary-button"}
-                style={{ padding: "9px 18px", fontSize: "0.82rem" }}
+                className="secondary-button"
+                aria-pressed={skipCamera}
+                style={skipCamera ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
                 onClick={() => setSkipCamera((prev) => !prev)}
               >
-                {skipCamera ? "Mode Tanpa Kamera ✓" : "Tanpa Kamera"}
+                {skipCamera ? "Mode tanpa kamera aktif" : "Lanjut tanpa kamera"}
               </button>
             </div>
 
-            {/* Subtle Practice & Consent Strip */}
-            <div style={{ background: "var(--surface-elevated)", borderRadius: "10px", padding: "14px 18px", border: "1px solid var(--surface-border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "24px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            {/* Practice and consent strip */}
+            <div className="practice-strip">
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
                 <div
+                  className="practice-dot"
                   style={{
-                    width: "28px",
-                    height: "28px",
-                    borderRadius: "50%",
                     background: practiceStimulusVisible
                       ? practiceKind === "go"
-                        ? "#10b981"
+                        ? "#34d399"
                         : "#ef4444"
-                      : "var(--surface-border)",
-                    transition: "background 0.08s ease",
+                      : undefined,
                   }}
                 />
-                <div>
-                  <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                <div className="practice-copy">
+                  <div className="practice-title">
                     {practiceState === "running"
-                      ? "Tekan [SPACE] saat HIJAU"
+                      ? "Tekan Space saat lingkaran hijau muncul"
                       : practiceState === "passed"
-                      ? `Latihan Motorik Lolos (${practiceScore}/6) ✓`
-                      : "Uji coba respon stimulus kilat 250ms"}
+                      ? `Latihan motorik lolos (${practiceScore}/6)`
+                      : "Uji coba respons stimulus 250 ms"}
                   </div>
-                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "3px" }}>
-                    {practiceFeedback}
-                  </div>
+                  <div className="practice-feedback">{practiceFeedback}</div>
                 </div>
               </div>
               {practiceState === "running" ? (
                 <button
                   type="button"
                   className="primary-button"
-                  style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                  style={{ minHeight: 34, padding: "6px 14px", fontSize: "0.78rem" }}
                   onClick={handlePracticeRespond}
                 >
-                  RESPON
+                  Respons
                 </button>
               ) : (
                 <button
                   type="button"
                   className="secondary-button"
-                  style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                  style={{ minHeight: 34, padding: "6px 14px", fontSize: "0.78rem" }}
                   onClick={startGuidedPractice}
                 >
                   {practiceState === "passed" ? "Ulangi" : "Coba (6x)"}
@@ -959,29 +966,16 @@ export default function ScreeningPage() {
               )}
             </div>
 
-            {/* Integrity Gate: every condition must be green before the session starts */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "18px" }}>
+            {/* Integrity gate: every condition must be ready before the session starts */}
+            <div className="gate-grid">
               {[
                 { ok: cameraReady, label: skipCamera ? "Kamera dilewati" : "Kamera aktif" },
                 { ok: practicePassed, label: "Latihan motorik lolos" },
                 { ok: fullscreenReady, label: fullscreenSupported ? "Layar penuh aktif" : "Layar penuh tidak didukung" },
                 { ok: consent, label: "Persetujuan non-medis" },
               ].map((gate) => (
-                <div
-                  key={gate.label}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "7px",
-                    fontSize: "0.72rem",
-                    color: gate.ok ? "var(--accent-teal)" : "var(--text-muted)",
-                    background: "var(--surface-elevated)",
-                    border: "1px solid var(--surface-border-subtle)",
-                    borderRadius: "7px",
-                    padding: "7px 10px",
-                  }}
-                >
-                  <span className={`sensor-dot-light ${gate.ok ? "active" : "danger"}`} />
+                <div key={gate.label} className={`gate-item ${gate.ok ? "is-ready" : ""}`}>
+                  <span className={`sensor-dot-light ${gate.ok ? "active" : ""}`} />
                   {gate.label}
                 </div>
               ))}
@@ -993,24 +987,22 @@ export default function ScreeningPage() {
               </p>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "20px", borderTop: "1px solid var(--surface-border-subtle)" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)", cursor: "pointer" }}>
+            <div className="lab-footer">
+              <label className="check-field">
                 <input
                   type="checkbox"
                   checked={consent}
                   onChange={(e) => setConsent(e.target.checked)}
-                  style={{ accentColor: "var(--accent-teal)" }}
                 />
                 Setuju instrumen penapisan non-medis
               </label>
 
               <button
                 className="primary-button"
-                style={{ padding: "11px 26px", fontSize: "0.9rem", fontWeight: 700 }}
                 disabled={!gateReady}
                 onClick={() => void proceedToSesi1()}
               >
-                Mulai Sesi 1 (Kuesioner) →
+                Mulai Sesi 1, Kuesioner
               </button>
             </div>
           </div>
@@ -1084,14 +1076,14 @@ export default function ScreeningPage() {
             <div className="status-pill">
               <span className="status-dot" />{" "}
               {isDemo
-                ? `Simulasi Benchmark 6 Blok · ${demoProfile.toUpperCase()}`
-                : `Sesi Selesai (${actualDurationSec}s) · ${formatSessionDate(sessionStartedAt)}`}
+                ? `Simulasi benchmark 6 blok, profil ${demoProfile}`
+                : `Sesi selesai (${actualDurationSec} detik), ${formatSessionDate(sessionStartedAt)}`}
             </div>
             <h1 style={{ color: "var(--text-primary)" }}>
-              Hasil Pengamatan <em>Ritme Fokusmu.</em>
+              Hasil pengamatan <em>ritme fokusmu.</em>
             </h1>
             <p className="hero-lede" style={{ marginBottom: "14px" }}>
-              ID Sesi: <strong>{sessionId || "OC-LOCAL"}</strong> ·{" "}
+              ID sesi: <strong>{sessionId || "OC-LOCAL"}</strong> ·{" "}
               {isDemo ? "Data benchmark sintetis" : formatSubjectContextLabel(subjectContext)}
             </p>
           </div>
@@ -1103,14 +1095,14 @@ export default function ScreeningPage() {
               className={`tab-btn ${analysisMode === "layperson" ? "active" : ""}`}
               onClick={() => setAnalysisMode("layperson")}
             >
-              Penjelasan Untuk Saya (Awam &amp; Praktis)
+              Penjelasan untuk saya
             </button>
             <button
               type="button"
               className={`tab-btn ${analysisMode === "clinical" ? "active" : ""}`}
               onClick={() => setAnalysisMode("clinical")}
             >
-              Lembar Rujukan Medis (Dokter / Psikolog)
+              Lembar rujukan medis
             </button>
           </div>
 
@@ -1119,45 +1111,45 @@ export default function ScreeningPage() {
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Stamina Fokus & Kecepatan" : "Psychomotor Speed & RTV"}
+                  {analysisMode === "layperson" ? "Stamina fokus dan kecepatan" : "Kecepatan psikomotor dan RTV"}
                 </div>
                 <div className="result-card-value">{metrics.medianReactionTimeMs ?? 0} ms</div>
                 <div className="result-card-desc">
                   {analysisMode === "layperson"
                     ? "Waktu rata-rata otakmu merespons target hijau yang muncul sekejap."
-                    : `Median RT: ${metrics.medianReactionTimeMs ?? 0} ms · RTV (Variabilitas): ${metrics.reactionTimeVariabilityMs ?? 0} ms · Fatigue Slope: ${clinicalStats.fatigueSlope ?? 0}/blok.`}
+                    : `Median RT: ${metrics.medianReactionTimeMs ?? 0} ms · RTV (variabilitas): ${metrics.reactionTimeVariabilityMs ?? 0} ms · Fatigue slope: ${clinicalStats.fatigueSlope ?? 0}/blok.`}
                 </div>
               </div>
               <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--accent-teal)" }}>
-                Ketepatan Go: {percent(metrics.hitRate)} · Lapse (&gt;750ms): {clinicalStats.attentionLapses}
+                Ketepatan Go: {percent(metrics.hitRate)} · Lapse (&gt;750 ms): {clinicalStats.attentionLapses}
               </div>
             </div>
 
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Kontrol Rem & Kelengahan" : "Inhibition & Signal Detection (d')"}
+                  {analysisMode === "layperson" ? "Kontrol impuls dan kelengahan" : "Inhibisi dan deteksi sinyal (d')"}
                 </div>
                 <div className="result-card-value">
                   {analysisMode === "layperson"
-                    ? `${metrics.commissions} Salah`
+                    ? `${metrics.commissions} salah`
                     : `d' = ${clinicalStats.dPrime ?? "N/A"}`}
                 </div>
                 <div className="result-card-desc">
                   {analysisMode === "layperson"
                     ? "Berapa kali jari terburu-buru menekan target merah yang harusnya ditahan."
-                    : `Commission Rate: ${percent(metrics.commissionRate)} (${metrics.commissions}x) · Omission Rate: ${percent(metrics.omissionRate)} (${metrics.omissions}x).`}
+                    : `Commission rate: ${percent(metrics.commissionRate)} (${metrics.commissions}x) · Omission rate: ${percent(metrics.omissionRate)} (${metrics.omissions}x).`}
                 </div>
               </div>
               <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--coral-danger)" }}>
-                Terlewat (Omission): {metrics.omissions} · Antisipasi (&lt;120ms): {clinicalStats.anticipatoryResponses}
+                Terlewat (omission): {metrics.omissions} · Antisipasi (&lt;120 ms): {clinicalStats.anticipatoryResponses}
               </div>
             </div>
 
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Keluhan Harian (WHO ASRS)" : "Chronic Trait & Context"}
+                  {analysisMode === "layperson" ? "Keluhan harian (WHO ASRS)" : "Trait kronis dan konteks"}
                 </div>
                 <div className="result-card-value">
                   {asrsResult ? `${asrsResult.significantCount}/6` : "-"}
@@ -1171,7 +1163,7 @@ export default function ScreeningPage() {
                 </div>
               </div>
               <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)" }}>
-                Skor ASRS: {asrsResult?.totalScore ?? 0}/24 · Interupsi Tab: {tabDistractionCount}x
+                Skor ASRS: {asrsResult?.totalScore ?? 0}/24 · Interupsi tab: {tabDistractionCount}x
               </div>
             </div>
           </div>
@@ -1180,7 +1172,7 @@ export default function ScreeningPage() {
           <div className="analysis-panel">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "12px", flexWrap: "wrap" }}>
               <strong style={{ fontSize: "0.95rem", color: "var(--text-primary)" }}>
-                {analysisMode === "layperson" ? "Kesimpulan & Kebiasaan Harian" : "Ringkasan Rujukan Klinis Profesional"}
+                {analysisMode === "layperson" ? "Kesimpulan dan kebiasaan harian" : "Ringkasan rujukan klinis"}
               </strong>
               <button
                 type="button"
@@ -1189,7 +1181,7 @@ export default function ScreeningPage() {
                 onClick={() => void requestAnalysisWith(trials, asrsResult, isDemo, actualDurationSec, tabDistractionCount)}
                 disabled={analysisLoading}
               >
-                {analysisLoading ? "Menganalisis…" : "Perbarui Analisis AI"}
+                {analysisLoading ? "Menganalisis..." : "Perbarui analisis"}
               </button>
             </div>
 
@@ -1206,7 +1198,7 @@ export default function ScreeningPage() {
                     {analysis.layperson_insight.reaction_style_description}
                   </p>
                   <strong style={{ fontSize: "0.82rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-primary)" }}>
-                    Langkah Praktis yang Bisa Dicoba:
+                    Langkah praktis yang bisa dicoba
                   </strong>
                   <ul style={{ margin: "8px 0 0", paddingLeft: "20px", fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
                     {analysis.layperson_insight.actionable_habits.map((h, i) => (
@@ -1217,13 +1209,13 @@ export default function ScreeningPage() {
               ) : (
                 <div>
                   <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "10px", marginBottom: "12px", border: "1px solid var(--surface-border)" }}>
-                    <strong style={{ color: "var(--text-primary)" }}>Batasan Triase: </strong>
+                    <strong style={{ color: "var(--text-primary)" }}>Batasan triase: </strong>
                     <span style={{ fontSize: "0.84rem", color: "var(--text-secondary)" }}>
                       {analysis.clinical_referral.diagnostic_impression}
                     </span>
                   </div>
                   <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
-                    <strong style={{ color: "var(--text-primary)" }}>Korelasi ASRS &amp; Konteks: </strong>
+                    <strong style={{ color: "var(--text-primary)" }}>Korelasi ASRS dan konteks: </strong>
                     {analysis.clinical_referral.asrs_clinical_correlation}
                   </p>
                   <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
@@ -1231,16 +1223,16 @@ export default function ScreeningPage() {
                     {analysis.clinical_referral.cpt_psychometric_note}
                   </p>
                   <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 12px" }}>
-                    <strong style={{ color: "var(--text-primary)" }}>Stabilitas Okulomotor: </strong>
+                    <strong style={{ color: "var(--text-primary)" }}>Stabilitas okulomotor: </strong>
                     {analysis.clinical_referral.gaze_stability_note}
                   </p>
-                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Rekomendasi Tindak Lanjut:</strong>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Rekomendasi tindak lanjut</strong>
                   <ul style={{ margin: "6px 0 10px", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                     {analysis.clinical_referral.provisional_recommendations.map((r, i) => (
                       <li key={i}>{r}</li>
                     ))}
                   </ul>
-                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Keterbatasan Metodologis:</strong>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Keterbatasan metodologis</strong>
                   <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
                     {analysis.clinical_referral.formal_limitations.map((l, i) => (
                       <li key={i}>{l}</li>
@@ -1251,10 +1243,10 @@ export default function ScreeningPage() {
             ) : (
               <div style={{ padding: "12px 0", color: "var(--text-muted)", fontSize: "0.82rem" }}>
                 {analysisLoading
-                  ? "Menyusun analisis triangulasi (ASRS + CPT 6-Blok + Konteks)…"
+                  ? "Menyusun analisis triangulasi (ASRS, CPT 6 blok, dan konteks)..."
                   : analysisError
-                  ? "Analisis AI eksternal gagal dimuat. Klik Perbarui Analisis AI untuk mencoba ulang."
-                  : "Menyiapkan ringkasan hasil…"}
+                  ? "Analisis eksternal gagal dimuat. Klik perbarui analisis untuk mencoba ulang."
+                  : "Menyiapkan ringkasan hasil..."}
               </div>
             )}
           </div>
@@ -1262,9 +1254,9 @@ export default function ScreeningPage() {
           {/* Multi-Block Attention Fatigue Curve */}
           <div className="attention-curve">
             <div className="curve-heading">
-              <strong>Kurva Stamina &amp; Kecepatan per Blok ({attentionBlocks.length} Blok)</strong>
+              <strong>Kurva stamina dan kecepatan per blok ({attentionBlocks.length} blok)</strong>
               <span>
-                Fatigue Slope: {clinicalStats.fatigueSlope ?? 0}/blok · RT Slope: {clinicalStats.rtSlopeMsPerBlock ?? 0} ms/blok
+                Fatigue slope: {clinicalStats.fatigueSlope ?? 0}/blok · RT slope: {clinicalStats.rtSlopeMsPerBlock ?? 0} ms/blok
               </span>
             </div>
             <div className="curve-bars">
@@ -1291,7 +1283,7 @@ export default function ScreeningPage() {
               ))}
             </div>
             <div className="curve-legend" style={{ marginTop: "10px" }}>
-              <span>Penurunan bar di Blok 3–6 mencerminkan kelelahan atensi saat tugas monoton/tekanan tinggi.</span>
+              <span>Penurunan bar di blok 3 sampai 6 mencerminkan kelelahan atensi saat tugas monoton atau tekanan tinggi.</span>
             </div>
           </div>
 
@@ -1299,11 +1291,11 @@ export default function ScreeningPage() {
           {((!isDemo && gaze.quality.status !== "unavailable") || isDemo) && (
             <div className="gaze-panel">
               <div className="curve-heading">
-                <strong>Kestabilan Fiksasi Mata {isDemo ? "(Simulasi Sintetis)" : `(Status: ${gaze.quality.status.toUpperCase()})`}</strong>
+                <strong>Kestabilan fiksasi mata {isDemo ? "(simulasi sintetis)" : `(${gaze.quality.status})`}</strong>
                 <span>
                   {isDemo
-                    ? "64 Titik Benchmark"
-                    : `Coverage: ${percent(gaze.quality.coverage)} · Out-of-Bounds: ${percent(gaze.outOfBoundsRate)}`}
+                    ? "64 titik benchmark"
+                    : `Cakupan: ${percent(gaze.quality.coverage)} · Di luar batas: ${percent(gaze.outOfBoundsRate)}`}
                 </span>
               </div>
               <div className="gaze-plot">
@@ -1330,14 +1322,14 @@ export default function ScreeningPage() {
           {/* Footer Actions & Export */}
           <div className="hero-actions btn-no-print" style={{ marginTop: "28px" }}>
             <button className="primary-button" onClick={printSummary}>
-              Cetak / Simpan Lembar Rujukan (PDF A4) <span aria-hidden="true">→</span>
+              Cetak lembar rujukan (PDF A4)
             </button>
             <button className="secondary-button" onClick={downloadJson}>
-              Unduh Data Telemetri v2.1 (.JSON)
+              Unduh data telemetri (JSON)
             </button>
             {user && (
               <Link className="secondary-button" href="/dashboard">
-                Lihat di Dashboard Histori
+                Lihat di dashboard riwayat
               </Link>
             )}
             <button
@@ -1350,7 +1342,7 @@ export default function ScreeningPage() {
                 setPhase("ready");
               }}
             >
-              Ulangi Tes ↻
+              Ulangi tes
             </button>
             <Link className="text-link" href="/">
               Kembali ke Beranda
