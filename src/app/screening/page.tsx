@@ -108,12 +108,15 @@ export default function ScreeningPage() {
   const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [isTestPaused, setIsTestPaused] = useState(false);
   const [tabDistractionCount, setTabDistractionCount] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
 
   // Guided Timed Practice (6 real 250ms flash trials)
   const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
   const [practiceStimulusVisible, setPracticeStimulusVisible] = useState(false);
   const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
-  const [, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
+  const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
   const [practiceScore, setPracticeScore] = useState(0);
   const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
   const practiceCorrectRef = useRef(0);
@@ -207,6 +210,23 @@ export default function ScreeningPage() {
     video.srcObject = streamRef.current;
     void video.play().catch(() => setCameraStatus("denied"));
   }, [cameraStatus, phase]);
+
+  // Track fullscreen state so the integrity gate can enforce it
+  useEffect(() => {
+    setFullscreenSupported(document.fullscreenEnabled && typeof document.documentElement.requestFullscreen === "function");
+    const handleFullscreenChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    handleFullscreenChange();
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  // Leaving fullscreen mid-test is treated as a focus violation
+  useEffect(() => {
+    if (phase === "running" && fullscreenSupported && !isFullscreen && !isTestPaused) {
+      setIsTestPaused(true);
+      setTabDistractionCount((prev) => prev + 1);
+    }
+  }, [isFullscreen, phase, fullscreenSupported, isTestPaused]);
 
   // Pause & resume management on tab-switch / window-blur
   useEffect(() => {
@@ -345,6 +365,13 @@ export default function ScreeningPage() {
 
     const activeUsr = getActiveUser();
     if (activeUsr && !isDemo) {
+      const exportPayload = buildSessionExport(sessionId, false, finalMetrics, gaze.quality, asrsResult, {
+        clinicalStats: finalStats,
+        subjectContext,
+        durationSeconds: elapsedSec,
+        tabInterruptions: tabDistractionCount,
+        outOfBoundsRate: gaze.outOfBoundsRate,
+      });
       persistSessionToStorage({
         sessionId: sessionId || "OC-LOCAL",
         userId: activeUsr.id,
@@ -359,6 +386,7 @@ export default function ScreeningPage() {
         commissions: finalMetrics.commissions,
         dPrime: finalStats.dPrime,
         gazeStatus: gaze.quality.status,
+        exportPayload,
       });
     }
 
@@ -369,8 +397,9 @@ export default function ScreeningPage() {
     isDemo,
     sessionId,
     asrsResult,
-    gaze.quality.status,
-    subjectContext.testMode,
+    gaze.quality,
+    gaze.outOfBoundsRate,
+    subjectContext,
     tabDistractionCount,
     requestAnalysisWith,
   ]);
@@ -644,9 +673,31 @@ export default function ScreeningPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  const proceedToSesi1 = () => {
+  const proceedToSesi1 = async () => {
+    if (fullscreenSupported && !document.fullscreenElement) {
+      try {
+        await document.documentElement.requestFullscreen();
+        setFullscreenError("");
+      } catch {
+        setFullscreenError("Layar penuh ditolak peramban. Izinkan mode layar penuh untuk memulai tes.");
+        return;
+      }
+    }
     setAsrsStep(0);
     setPhase("questionnaire");
+  };
+
+  const resumeTest = async () => {
+    if (fullscreenSupported && !document.fullscreenElement) {
+      try {
+        await document.documentElement.requestFullscreen();
+        setFullscreenError("");
+      } catch {
+        setFullscreenError("Kembali ke layar penuh diperlukan sebelum melanjutkan tes.");
+        return;
+      }
+    }
+    setIsTestPaused(false);
   };
 
   const finishSesi1AndStartCpt = () => {
@@ -658,6 +709,10 @@ export default function ScreeningPage() {
 
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
   const currentAsrsAnswered = asrsAnswers[currentAsrsQuestion.id] !== undefined;
+  const cameraReady = skipCamera || cameraStatus === "ready";
+  const fullscreenReady = !fullscreenSupported || isFullscreen;
+  const practicePassed = practiceState === "passed";
+  const gateReady = consent && cameraReady && practicePassed && fullscreenReady;
 
   return (
     <main className="site-shell screening-shell">
@@ -870,13 +925,18 @@ export default function ScreeningPage() {
                     transition: "background 0.08s ease",
                   }}
                 />
-                <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
-                  {practiceState === "running"
-                    ? "Tekan [SPACE] saat HIJAU"
-                    : practiceState === "passed"
-                    ? `Latihan Motorik Lolos (${practiceScore}/6) ✓`
-                    : "Uji coba respon stimulus kilat 250ms"}
-                </span>
+                <div>
+                  <div style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                    {practiceState === "running"
+                      ? "Tekan [SPACE] saat HIJAU"
+                      : practiceState === "passed"
+                      ? `Latihan Motorik Lolos (${practiceScore}/6) ✓`
+                      : "Uji coba respon stimulus kilat 250ms"}
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: "3px" }}>
+                    {practiceFeedback}
+                  </div>
+                </div>
               </div>
               {practiceState === "running" ? (
                 <button
@@ -899,6 +959,40 @@ export default function ScreeningPage() {
               )}
             </div>
 
+            {/* Integrity Gate: every condition must be green before the session starts */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px", marginBottom: "18px" }}>
+              {[
+                { ok: cameraReady, label: skipCamera ? "Kamera dilewati" : "Kamera aktif" },
+                { ok: practicePassed, label: "Latihan motorik lolos" },
+                { ok: fullscreenReady, label: fullscreenSupported ? "Layar penuh aktif" : "Layar penuh tidak didukung" },
+                { ok: consent, label: "Persetujuan non-medis" },
+              ].map((gate) => (
+                <div
+                  key={gate.label}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    fontSize: "0.72rem",
+                    color: gate.ok ? "var(--accent-teal)" : "var(--text-muted)",
+                    background: "var(--surface-elevated)",
+                    border: "1px solid var(--surface-border-subtle)",
+                    borderRadius: "7px",
+                    padding: "7px 10px",
+                  }}
+                >
+                  <span className={`sensor-dot-light ${gate.ok ? "active" : "danger"}`} />
+                  {gate.label}
+                </div>
+              ))}
+            </div>
+
+            {fullscreenError && (
+              <p style={{ margin: "0 0 14px", fontSize: "0.76rem", color: "var(--coral-danger)" }} role="alert">
+                {fullscreenError}
+              </p>
+            )}
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "20px", borderTop: "1px solid var(--surface-border-subtle)" }}>
               <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)", cursor: "pointer" }}>
                 <input
@@ -913,8 +1007,8 @@ export default function ScreeningPage() {
               <button
                 className="primary-button"
                 style={{ padding: "11px 26px", fontSize: "0.9rem", fontWeight: 700 }}
-                disabled={!consent || (!skipCamera && cameraStatus !== "ready")}
-                onClick={proceedToSesi1}
+                disabled={!gateReady}
+                onClick={() => void proceedToSesi1()}
               >
                 Mulai Sesi 1 (Kuesioner) →
               </button>
@@ -944,13 +1038,18 @@ export default function ScreeningPage() {
               <h2 style={{ fontSize: "1.4rem", fontWeight: 700, margin: "0 0 10px", color: "#ffffff" }}>
                 Tes Dijeda: Fokus Layar Terputus
               </h2>
-              <p style={{ maxWidth: "420px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5, margin: "0 0 24px" }}>
-                Jendela browser kehilangan fokus. Waktu dijaga akurat tanpa mengurangi durasi. Interupsi: {tabDistractionCount}x.
+              <p style={{ maxWidth: "420px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5, margin: "0 0 16px" }}>
+                Jendela browser kehilangan fokus atau keluar dari layar penuh. Waktu dijaga akurat tanpa mengurangi durasi. Interupsi: {tabDistractionCount}x.
               </p>
+              {fullscreenError && (
+                <p style={{ maxWidth: "420px", color: "#fca5a5", fontSize: "0.78rem", lineHeight: 1.5, margin: "0 0 16px" }} role="alert">
+                  {fullscreenError}
+                </p>
+              )}
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => setIsTestPaused(false)}
+                onClick={() => void resumeTest()}
               >
                 Lanjutkan Tes →
               </button>

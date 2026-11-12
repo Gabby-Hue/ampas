@@ -1,3 +1,5 @@
+import type { SessionExport } from "../export/session";
+
 export type SessionHistoryEntry = {
   sessionId: string;
   userId: string;
@@ -12,6 +14,7 @@ export type SessionHistoryEntry = {
   commissions: number;
   dPrime?: number | null;
   gazeStatus: string;
+  exportPayload?: SessionExport;
 };
 
 export type UserTrends = {
