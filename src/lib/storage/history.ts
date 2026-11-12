@@ -3,12 +3,14 @@ export type SessionHistoryEntry = {
   userId: string;
   date: number;
   durationSeconds: number;
+  testMode?: "clinical" | "quick";
   asrsTotalScore: number;
   asrsSignificant: boolean;
   medianRtMs: number | null;
   hitRate: number;
   omissions: number;
   commissions: number;
+  dPrime?: number | null;
   gazeStatus: string;
 };
 

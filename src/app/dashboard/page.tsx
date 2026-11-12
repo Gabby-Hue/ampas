@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ProfileIconButton } from "@/components/ProfileIconButton";
 import { getActiveUser, setActiveUser, type SafeUser } from "@/lib/auth/auth";
 import {
   loadHistoryFromStorage,
@@ -62,6 +63,7 @@ export default function DashboardPage() {
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
+          <ProfileIconButton user={user} />
           <button
             type="button"
             className="secondary-button"
@@ -74,16 +76,28 @@ export default function DashboardPage() {
       </nav>
 
       {/* Dashboard Header */}
-      <div style={{ padding: "32px 0 24px" }}>
-        <div className="status-pill">
-          <span className="status-dot" /> Akun Terverifikasi Lokal
+      <div style={{ padding: "32px 0 24px", display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
+        <div
+          className="icon-circle-btn"
+          style={{ width: "60px", height: "60px", cursor: "default", borderColor: "var(--accent-teal)", color: "var(--accent-teal)" }}
+          aria-hidden="true"
+        >
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
         </div>
-        <h1 style={{ fontSize: "2.2rem", margin: "16px 0 8px", color: "var(--text-primary)" }}>
-          Selamat datang, <em>{user.name}</em>
-        </h1>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.92rem", margin: 0 }}>
-          {user.email} · Terdaftar sejak {new Date(user.createdAt).toLocaleDateString("id-ID", { dateStyle: "long" })}
-        </p>
+        <div>
+          <div className="status-pill">
+            <span className="status-dot" /> Akun Terverifikasi Lokal
+          </div>
+          <h1 style={{ fontSize: "2.1rem", margin: "10px 0 6px", color: "var(--text-primary)" }}>
+            Selamat datang, <em>{user.name}</em>
+          </h1>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.92rem", margin: 0 }}>
+            {user.email} · Terdaftar sejak {new Date(user.createdAt).toLocaleDateString("id-ID", { dateStyle: "long" })}
+          </p>
+        </div>
       </div>
 
       {/* 3 Metric Summary Cards */}
@@ -148,12 +162,22 @@ export default function DashboardPage() {
             className="hero-card"
             style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-secondary)" }}
           >
-            <div style={{ fontSize: "1.8rem", marginBottom: "12px" }}>📊</div>
+            <div
+              className="icon-circle-btn"
+              style={{ width: "52px", height: "52px", margin: "0 auto 14px", cursor: "default", color: "var(--accent-teal)" }}
+              aria-hidden="true"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10" />
+                <line x1="12" y1="20" x2="12" y2="4" />
+                <line x1="6" y1="20" x2="6" y2="14" />
+              </svg>
+            </div>
             <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
               Belum ada riwayat sesi
             </h3>
             <p style={{ fontSize: "0.85rem", maxWidth: "420px", margin: "0 auto 20px", lineHeight: 1.5 }}>
-              Jalankan tes refleks 60 detik pertamamu untuk mulai merekam data performa atensi dan mengunduh rujukan.
+              Jalankan sesi penapisan atensi pertamamu untuk mulai merekam data performa dan mengunduh lembar rujukan.
             </p>
             <Link className="primary-button" href="/screening">
               Jalankan Tes Sekarang →

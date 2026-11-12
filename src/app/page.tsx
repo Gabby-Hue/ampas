@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ProfileIconButton } from "@/components/ProfileIconButton";
 import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
 
 const conditions = [
@@ -87,9 +88,7 @@ export default function Home() {
         <div className="nav-right-actions">
           <ThemeToggle />
           {user ? (
-            <Link className="secondary-button" style={{ padding: "6px 14px", fontSize: "0.8rem" }} href="/dashboard">
-              Dashboard ({user.name.split(" ")[0]})
-            </Link>
+            <ProfileIconButton user={user} />
           ) : (
             <>
               <Link className="text-link" href="/login">
@@ -118,7 +117,7 @@ export default function Home() {
           </p>
           <div className="hero-actions">
             <Link className="primary-button" href="/screening">
-              Mulai Penapisan Terpandu (±90 Detik) <span>→</span>
+              Mulai Penapisan Terstandar (6 Menit / Mode Cepat) <span>→</span>
             </Link>
             {user ? (
               <Link className="secondary-button" href="/dashboard">
@@ -181,7 +180,7 @@ export default function Home() {
 
           <div style={{ borderTop: "1px solid var(--surface-border)", paddingTop: "14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", color: "var(--text-secondary)", marginBottom: "8px" }}>
-              <span>Kurva Ketahanan Fokus 60 Detik</span>
+              <span>Kurva Ketahanan Fokus 6 Blok (6 Menit)</span>
               <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent-teal)" }}>Blok 1 → Blok 6</span>
             </div>
             <div style={{ height: "40px", display: "flex", alignItems: "end", gap: "6px" }}>
@@ -302,7 +301,7 @@ export default function Home() {
             Bagaimana OculiCare Mengamati Fokusmu dalam 3 Langkah
           </h2>
           <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", lineHeight: 1.55 }}>
-            Dirancang tanpa gesekan teknis, melindungi privasi penuh, dan menghasilkan lembar rujukan dalam waktu kurang dari 2 menit.
+            Dirancang dengan protokol lingkungan terkontrol, menjaga privasi on-device, dan menghasilkan lembar rujukan terukur.
           </p>
         </div>
 
@@ -327,10 +326,10 @@ export default function Home() {
                 LANGKAH 02
               </div>
               <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--text-primary)" }}>
-                Tes Refleks CPT Go/No-Go 60 Detik
+                Tes CPT Dual-Paradigma (6 Blok)
               </h3>
               <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
-                Stimulus foveal kilat 250 milidetik menguji kecepatan rem motorik otakmu saat target hijau dan merah muncul bergantian di lingkungan terkontrol.
+                Stimulus foveal kilat 250 milidetik menguji ketahanan fokus (blok monoton) hingga rem impulsivitas motorik selama 6 menit di lingkungan terkontrol.
               </p>
             </div>
           </div>

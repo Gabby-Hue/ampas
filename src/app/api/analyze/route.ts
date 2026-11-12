@@ -1,16 +1,52 @@
 import { NextResponse } from "next/server";
 
+type AnalyzeBlock = {
+  label?: string;
+  phase?: string;
+  hit_rate?: number;
+  commission_rate?: number;
+  median_rt_ms?: number | null;
+};
+
 type AnalyzePayload = {
   test_version?: string;
+  test_mode?: "clinical" | "quick" | "synthetic";
   duration_seconds?: number;
+  tab_interruptions?: number;
+  subject_context?: {
+    sleepHours?: string;
+    caffeineRecent?: boolean;
+    screenTimeHours?: string;
+    timeOfDay?: string;
+  };
   asrs?: {
     total_score?: number;
     significant_items?: number;
     is_significant?: boolean;
   };
-  cpt?: { go_trials?: number; no_go_trials?: number; hit_rate?: number; omission_rate?: number; commission_rate?: number; median_rt_ms?: number | null; rt_variability_ms?: number | null };
-  gaze?: { status?: "usable" | "limited" | "unavailable"; data_coverage?: number; relative_dispersion?: number };
+  cpt?: {
+    go_trials?: number;
+    no_go_trials?: number;
+    hit_rate?: number;
+    omission_rate?: number;
+    commission_rate?: number;
+    median_rt_ms?: number | null;
+    rt_variability_ms?: number | null;
+    d_prime?: number | null;
+    anticipatory_responses?: number;
+    attention_lapses?: number;
+    fatigue_slope?: number | null;
+    rt_slope_ms_per_block?: number | null;
+  };
+  blocks?: AnalyzeBlock[];
+  gaze?: {
+    status?: "usable" | "limited" | "unavailable";
+    data_coverage?: number;
+    relative_dispersion?: number;
+    out_of_bounds_rate?: number;
+  };
 };
+
 type AnalysisResult = {
   source: string;
   is_diagnostic: false;
@@ -31,84 +67,137 @@ type AnalysisResult = {
   };
 };
 
-function numberInRange(value: unknown, min = 0, max = 1): value is number { return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max; }
+function numberInRange(value: unknown, min = 0, max = 1): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
 function validate(payload: AnalyzePayload) {
   const cpt = payload.cpt;
   const gaze = payload.gaze;
   const gazeStatusValid = gaze?.status == null || ["usable", "limited", "unavailable"].includes(gaze.status);
-  return !!cpt
-    && numberInRange(cpt.hit_rate)
-    && numberInRange(cpt.omission_rate)
-    && numberInRange(cpt.commission_rate)
-    && (cpt.go_trials == null || Number.isInteger(cpt.go_trials) && cpt.go_trials >= 0 && cpt.go_trials <= 1000)
-    && (cpt.no_go_trials == null || Number.isInteger(cpt.no_go_trials) && cpt.no_go_trials >= 0 && cpt.no_go_trials <= 1000)
-    && (cpt.median_rt_ms == null || numberInRange(cpt.median_rt_ms, 0, 10000))
-    && (cpt.rt_variability_ms == null || numberInRange(cpt.rt_variability_ms, 0, 10000))
-    && (payload.duration_seconds == null || numberInRange(payload.duration_seconds, 1, 600))
-    && gazeStatusValid
-    && (gaze?.data_coverage == null || numberInRange(gaze.data_coverage))
-    && (gaze?.relative_dispersion == null || numberInRange(gaze.relative_dispersion, 0, 2));
+  return (
+    !!cpt &&
+    numberInRange(cpt.hit_rate) &&
+    numberInRange(cpt.omission_rate) &&
+    numberInRange(cpt.commission_rate) &&
+    (cpt.go_trials == null || (Number.isInteger(cpt.go_trials) && cpt.go_trials >= 0 && cpt.go_trials <= 1000)) &&
+    (cpt.no_go_trials == null || (Number.isInteger(cpt.no_go_trials) && cpt.no_go_trials >= 0 && cpt.no_go_trials <= 1000)) &&
+    (cpt.median_rt_ms == null || numberInRange(cpt.median_rt_ms, 0, 10000)) &&
+    (cpt.rt_variability_ms == null || numberInRange(cpt.rt_variability_ms, 0, 10000)) &&
+    (payload.duration_seconds == null || numberInRange(payload.duration_seconds, 1, 1200)) &&
+    gazeStatusValid &&
+    (gaze?.data_coverage == null || numberInRange(gaze.data_coverage)) &&
+    (gaze?.relative_dispersion == null || numberInRange(gaze.relative_dispersion, 0, 2))
+  );
 }
 
 function localAnalysis(payload: AnalyzePayload): AnalysisResult {
   const cpt = payload.cpt!;
   const asrs = payload.asrs;
+  const ctx = payload.subject_context;
+  const durationMin = Math.max(1, Math.round((payload.duration_seconds ?? 360) / 60));
+
   const isHighOmission = (cpt.omission_rate ?? 0) >= 0.20;
   const isHighCommission = (cpt.commission_rate ?? 0) >= 0.25;
   const isSlowRt = (cpt.median_rt_ms ?? 0) > 480;
+  const hasFatigueDrop = (cpt.fatigue_slope ?? 0) <= -0.05;
+  const isSleepDeprived = ctx?.sleepHours === "<6";
+  const dPrimeVal = cpt.d_prime ?? null;
 
-  // Layperson Copywriting
+  // Stamina headline based on duration & fatigue slope
+  let staminaHeadline = `Ketahanan fokus sepanjang sesi ${durationMin} menit`;
+  let staminaDesc =
+    "Stamina perhatianmu cenderung konsisten dari awal hingga blok terakhir tanpa penurunan ketepatan yang tajam.";
+  if (hasFatigueDrop) {
+    staminaHeadline = `Penurunan stamina di paruh akhir (${durationMin} menit)`;
+    staminaDesc =
+      "Pada menit-menit awal fokusmu masih kuat, tetapi memasuki blok pertengahan hingga akhir mulai muncul kelelahan konsentrasi (vigilance decrement).";
+  } else if (isSleepDeprived) {
+    staminaHeadline = "Fokus terpengaruh kurang tidur (<6 jam)";
+    staminaDesc =
+      "Tidur di bawah 6 jam memperlambat pemrosesan sinyal otak dan membuat ketahanan fokus lebih cepat goyah saat tugas terasa monoton.";
+  }
+
+  // Reaction style
   let styleHeadline = "Pola respons terukur dan seimbang";
-  let styleDesc = "Kamu mampu menyeimbangkan kecepatan menekan target hijau dengan ketenangan menahan diri saat target merah muncul.";
+  let styleDesc =
+    "Kamu mampu menyeimbangkan kecepatan menekan target hijau dengan ketenangan menahan diri saat target merah muncul.";
   if (isHighCommission && !isHighOmission) {
     styleHeadline = "Tipe Refleks Cepat (Kecenderungan Terburu-buru)";
-    styleDesc = "Jarimu bergerak sangat tanggap, namun kamu rentan salah pencet saat melihat warna merah. Ini ciri khas refleks motorik yang mendahului evaluasi sadar.";
+    styleDesc =
+      "Jarimu bergerak sangat tanggap, namun rentan salah tekan saat warna merah muncul mendadak, ciri refleks motorik yang mendahului evaluasi sadar.";
   } else if (isHighOmission && !isHighCommission) {
     styleHeadline = "Tipe Rentan Melamun (Kelengahan Sesaat)";
-    styleDesc = "Kamu jarang salah menekan target merah, namun ada beberapa target hijau yang terlewat tanpa disadari saat perhatianmu melayang.";
+    styleDesc =
+      "Kamu jarang salah menekan target merah, namun beberapa target hijau terlewat saat fokus mulai melayang di fase yang terasa membosankan.";
   } else if (isHighOmission && isHighCommission) {
-    styleHeadline = "Kelelahan Fokus Menyeluruh (Brain Fog)";
-    styleDesc = "Terlihat fluktuasi ganda di mana target hijau terlewat sekaligus target merah keliru ditekan, menandakan beban kognitif atau kurang tidur.";
+    styleHeadline = "Kelelahan Fokus Menyeluruh (Cognitive Overload)";
+    styleDesc =
+      "Terjadi fluktuasi ganda: target hijau terlewat sekaligus target merah keliru ditekan. Pola ini sering muncul saat kelelahan mental, kurang tidur, atau kelebihan distraksi layar.";
   }
 
   const habits: string[] = [];
-  if (isHighCommission) habits.push("Terapkan 'jeda 2 detik' sebelum membuka notifikasi ponsel atau membalas pesan terburu-buru.");
-  if (isHighOmission || isSlowRt) habits.push("Bagi tugas berat ke dalam sesi fokus pendek 20 menit (Teknik Pomodoro) dengan jeda berdiri 3 menit.");
-  habits.push("Kurangi konsumsi konten video cepat di bawah 60 detik menjelang waktu tidur.");
+  if (isSleepDeprived) {
+    habits.push("Prioritaskan pemulihan tidur minimal 7 jam malam ini sebelum mengulang tes pembanding di pagi hari.");
+  }
+  if (isHighCommission) {
+    habits.push("Terapkan 'jeda 2 detik' sebelum membuka notifikasi ponsel atau mengetik balasan spontan.");
+  }
+  if (isHighOmission || hasFatigueDrop || isSlowRt) {
+    habits.push("Gunakan sesi fokus terstruktur 25 menit dengan istirahat visual tanpa layar selama 5 menit.");
+  }
+  if (habits.length < 3) {
+    habits.push("Batasi konsumsi konten video pendek (<60 detik) minimal 1 jam sebelum tidur untuk menjaga regulasi atensi.");
+  }
 
   // Clinical Referral Copywriting
+  const ctxSummary = ctx
+    ? `Konteks fisiologis pra-tes: tidur ${ctx.sleepHours} jam, kafein ${ctx.caffeineRecent ? "ya (<2 jam)" : "tidak"}, paparan layar ${ctx.screenTimeHours} jam (${ctx.timeOfDay}).`
+    : "Konteks fisiologis pra-tes tidak tercatat.";
+
   const asrsSummary = asrs
-    ? `Hasil kuesioner WHO ASRS v1.1 Part A menunjukkan skor ${asrs.total_score ?? 0}/24 (${asrs.significant_items ?? 0}/6 item melewati ambang batas keparahan; ${asrs.is_significant ? "Signifikan secara klinis" : "Dalam batas wajar"}).`
-    : "Data keluhan kronis ASRS v1.1 tidak disertakan pada sesi ini.";
+    ? `Skor WHO ASRS v1.1 Part A: ${asrs.total_score ?? 0}/24 (${asrs.significant_items ?? 0}/6 item di atas ambang keparahan; ${asrs.is_significant ? "Signifikan secara skrining" : "Di bawah ambang skrining"}). ${ctxSummary}`
+    : `Data ASRS v1.1 tidak disertakan. ${ctxSummary}`;
 
-  const cptNote = `Objektifikasi CPT Go/No-Go menunjukkan Hit Rate ${Math.round((cpt.hit_rate ?? 0) * 100)}%, Omission Rate ${Math.round((cpt.omission_rate ?? 0) * 100)}%, Commission Rate ${Math.round((cpt.commission_rate ?? 0) * 100)}%, Median RT ${cpt.median_rt_ms ?? 0} ms, RTV ${cpt.rt_variability_ms ?? 0} ms.`;
+  const dPrimeText = dPrimeVal !== null ? `d' (Signal Detectability): ${dPrimeVal}` : "d': N/A";
+  const slopeText =
+    cpt.fatigue_slope != null ? `Fatigue Slope: ${cpt.fatigue_slope}/blok` : "Fatigue Slope: N/A";
+  const cptNote = `CPT Go/No-Go (${payload.test_mode ?? "clinical"}, ${payload.duration_seconds ?? 360}s): Hit Rate ${Math.round((cpt.hit_rate ?? 0) * 100)}%, Omission ${Math.round((cpt.omission_rate ?? 0) * 100)}%, Commission ${Math.round((cpt.commission_rate ?? 0) * 100)}%, Median RT ${cpt.median_rt_ms ?? 0} ms, RTV ${cpt.rt_variability_ms ?? 0} ms, ${dPrimeText}, ${slopeText}, Antisipasi (<120ms): ${cpt.anticipatory_responses ?? 0}, Lapses (>750ms): ${cpt.attention_lapses ?? 0}, Interupsi Tab: ${payload.tab_interruptions ?? 0}.`;
 
-  const gazeNote = payload.gaze?.status === "usable"
-    ? `Pemantauan stabilitas fiksasi okulomotorik (Webcam Gaze On-Device) mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}% dengan dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}.`
-    : "Sensor gaze tidak aktif atau coverage sub-optimal; analisis okulomotor diabaikan.";
+  const gazeNote =
+    payload.gaze?.status === "usable"
+      ? `Pelacakan fiksasi MediaPipe On-Device mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}%, dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}, dan out-of-bounds rate ${Math.round((payload.gaze.out_of_bounds_rate ?? 0) * 100)}%.`
+      : "Sensor okulomotorik tidak aktif atau coverage berada di bawah ambang kualitas; interpretasi difokuskan pada psikometri motorik CPT.";
+
+  const recs: string[] = [
+    "Lakukan evaluasi diagnostik komprehensif (wawancara klinis terstruktur & Conners CPT 3 / T.O.V.A.) bila keluhan menimbulkan hendaya fungsional menetap.",
+  ];
+  if (isSleepDeprived) {
+    recs.push("Perlu menyingkirkan faktor kelelahan akut akibat defisit tidur (<6 jam) dengan penjadwalan ulang skrining dalam kondisi cukup istirahat.");
+  } else {
+    recs.push("Pertimbangkan diagnosis banding terhadap gangguan afektif, kecemasan, atau beban stres kerja/akademik akut.");
+  }
 
   return {
-    source: "local-dual-tone-guardrail-v2",
+    source: "local-clinical-triangulation-v3",
     is_diagnostic: false,
     layperson_insight: {
-      stamina_headline: "Stamina atensi tugas 60 detik",
-      stamina_description: "Gambaran ini memperlihatkan bagaimana otakmu menjaga ketepatan waktu reaksi dan menahan refleks tergesa-gesa.",
+      stamina_headline: staminaHeadline,
+      stamina_description: staminaDesc,
       reaction_style_headline: styleHeadline,
       reaction_style_description: styleDesc,
-      actionable_habits: habits,
+      actionable_habits: habits.slice(0, 3),
     },
     clinical_referral: {
-      diagnostic_impression: "Screening ini merupakan instrumen triase performa atensi neurobehavioral awal dan BUKAN instrumen penentu diagnosis klinis mandiri (non-DSM-5 definitive diagnostic).",
+      diagnostic_impression:
+        "Instrumen ini adalah penapisan awal performa atensi dan BUKAN alat diagnosis medis/DSM-5 mandiri. Hasil harus ditafsirkan bersama riwayat klinis oleh psikolog atau psikiater.",
       asrs_clinical_correlation: asrsSummary,
       cpt_psychometric_note: cptNote,
       gaze_stability_note: gazeNote,
-      provisional_recommendations: [
-        "Direkomendasikan evaluasi psikometri lanjutan (Conners CPT 3 komprehensif atau CAARS) bila keluhan atensi menimbulkan hendaya fungsional.",
-        "Pertimbangkan evaluasi diferensial terhadap faktor komorbid (gangguan afektif, ansietas, atau sleep hygiene).",
-      ],
+      provisional_recommendations: recs,
       formal_limitations: [
-        "Durasi penapisan peramban singkat tidak mengisolasi faktor kelelahan akut situasional.",
-        "Metrik okulomotorik MediaPipe merupakan aproksimasi teknis dan tidak setara perangkat eye-tracking inframerah laboratorium.",
+        "Pengujian berbasis web mengandalkan perangkat input keyboard/touch konsumen yang memiliki variansi latensi 10–30 ms.",
+        "Metrik okulomotorik webcam 20–30 Hz merupakan indikator kestabilan relatif dan bukan biomarker microsaccade klinis.",
       ],
     },
   };
@@ -119,7 +208,7 @@ async function geminiAnalysis(payload: AnalyzePayload): Promise<AnalysisResult |
   if (!key) return null;
   const model = process.env.GEMINI_MODEL || "gemini-1.5-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
-  
+
   const schema = {
     type: "OBJECT",
     properties: {
@@ -132,7 +221,13 @@ async function geminiAnalysis(payload: AnalyzePayload): Promise<AnalysisResult |
           reaction_style_description: { type: "STRING" },
           actionable_habits: { type: "ARRAY", items: { type: "STRING" } },
         },
-        required: ["stamina_headline", "stamina_description", "reaction_style_headline", "reaction_style_description", "actionable_habits"],
+        required: [
+          "stamina_headline",
+          "stamina_description",
+          "reaction_style_headline",
+          "reaction_style_description",
+          "actionable_habits",
+        ],
       },
       clinical_referral: {
         type: "OBJECT",
@@ -144,18 +239,25 @@ async function geminiAnalysis(payload: AnalyzePayload): Promise<AnalysisResult |
           provisional_recommendations: { type: "ARRAY", items: { type: "STRING" } },
           formal_limitations: { type: "ARRAY", items: { type: "STRING" } },
         },
-        required: ["diagnostic_impression", "asrs_clinical_correlation", "cpt_psychometric_note", "gaze_stability_note", "provisional_recommendations", "formal_limitations"],
+        required: [
+          "diagnostic_impression",
+          "asrs_clinical_correlation",
+          "cpt_psychometric_note",
+          "gaze_stability_note",
+          "provisional_recommendations",
+          "formal_limitations",
+        ],
       },
     },
     required: ["layperson_insight", "clinical_referral"],
   };
 
-  const prompt = `You are a medical intelligence assistant analyzing attention performance data for OculiCare NeuroFocus.
-You MUST generate two distinct copywriting versions:
-1. "layperson_insight": friendly, non-medical, encouraging, easy-to-understand Indonesian for general users. Explain focus stamina, distraction tendencies (e.g. impulsive tapping vs daydreaming), and 3 practical daily habits.
-2. "clinical_referral": formal, professional clinical psychiatric/psychological Indonesian phrasing for doctors/psychologists reviewing this referral sheet. State metrics objectively, reference WHO ASRS and CPT indices, and emphasize that this is a non-diagnostic early screening.
-Never prescribe drugs or dosage. Return pure JSON matching the schema.
-Input Payload: ${JSON.stringify(payload)}`;
+  const prompt = `You are a neuropsychology triage assistant analyzing OculiCare NeuroFocus data.
+Generate two structured Indonesian summaries:
+1. "layperson_insight": warm, non-stigmatizing, actionable explanation referencing stamina across blocks, sleep/caffeine context, and 3 concrete daily habits.
+2. "clinical_referral": objective, formal referral summary for psychologists/psychiatrists citing ASRS v1.1, d-prime, RTV, block-by-block fatigue slope, anticipatory/lapse counts, and physiological confounders (sleep/caffeine/tab switches). Explicitly state non-diagnostic status.
+Never diagnose ADHD or prescribe medication. Return pure JSON matching schema.
+Payload: ${JSON.stringify(payload)}`;
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -168,12 +270,24 @@ Input Payload: ${JSON.stringify(payload)}`;
   });
 
   if (!response.ok) return null;
-  const data = await response.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  const data = (await response.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) return null;
 
   try {
     const parsed = JSON.parse(text) as Omit<AnalysisResult, "source" | "is_diagnostic">;
+    const validText = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0 && v.length <= 1500;
+    const validList = (v: unknown): v is string[] => Array.isArray(v) && v.length > 0 && v.length <= 6 && v.every(validText);
+    if (
+      !parsed.layperson_insight ||
+      !parsed.clinical_referral ||
+      !validText(parsed.layperson_insight.stamina_headline) ||
+      !validText(parsed.layperson_insight.reaction_style_headline) ||
+      !validList(parsed.layperson_insight.actionable_habits) ||
+      !validText(parsed.clinical_referral.diagnostic_impression)
+    ) {
+      return null;
+    }
     return { ...parsed, source: `gemini-${model}`, is_diagnostic: false };
   } catch {
     return null;
@@ -183,7 +297,7 @@ Input Payload: ${JSON.stringify(payload)}`;
 export async function POST(request: Request) {
   let payload: AnalyzePayload;
   try {
-    payload = await request.json() as AnalyzePayload;
+    payload = (await request.json()) as AnalyzePayload;
   } catch {
     return NextResponse.json({ error: "Payload JSON tidak valid." }, { status: 400 });
   }
@@ -199,4 +313,3 @@ export async function POST(request: Request) {
     return NextResponse.json(localAnalysis(payload));
   }
 }
-

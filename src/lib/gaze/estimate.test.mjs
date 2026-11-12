@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { estimateRelativeIrisPosition } from "./estimate.ts";
+import { applyGazeCalibration, estimateFaceDiagnostics, estimateRelativeIrisPosition } from "./estimate.ts";
 
 function face(offsetX = 0, offsetY = 0) {
   const points = Array.from({ length: 478 }, () => ({ x: 0, y: 0 }));
@@ -22,4 +22,19 @@ test("relative iris position stays stable when the entire face shifts", () => {
 
 test("relative iris position rejects missing landmarks", () => {
   assert.equal(estimateRelativeIrisPosition([]).valid, false);
+});
+
+test("estimateFaceDiagnostics detects centered optimal face and applyGazeCalibration normalizes", () => {
+  const pts = face();
+  pts[1] = { x: 0.5, y: 0.5 };
+  const diag = estimateFaceDiagnostics(pts);
+  assert.equal(diag.faceDetected, true);
+  assert.equal(diag.faceCentered, true);
+
+  const calibrated = applyGazeCalibration(
+    { x: 0.55, y: 0.5, valid: true },
+    { minX: 0.4, maxX: 0.6, minY: 0.4, maxY: 0.6, centerX: 0.5, centerY: 0.5 }
+  );
+  assert.equal(calibrated.valid, true);
+  assert.ok(calibrated.x > 0.5 && calibrated.x <= 1);
 });

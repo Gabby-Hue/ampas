@@ -15,3 +15,10 @@ export function calculateGazeQuality(samples: GazeSample[], minimumCoverage = 0.
   const enoughSamples = valid.length >= MINIMUM_VALID_SAMPLES;
   return { status: enoughCoverage && enoughSamples ? "usable" : "limited", reason: enoughCoverage ? enoughSamples ? "ready" : "insufficient-samples" : "low-coverage", coverage, relativeDispersion, validSamples: valid.length };
 }
+
+export function calculateOutOfBoundsRate(samples: GazeSample[]): number {
+  const valid = samples.filter((sample) => sample.valid && Number.isFinite(sample.x) && Number.isFinite(sample.y));
+  if (!valid.length) return 0;
+  const outCount = valid.filter((s) => s.x < 0.15 || s.x > 0.85 || s.y < 0.15 || s.y > 0.85).length;
+  return Math.round((outCount / valid.length) * 1000) / 1000;
+}

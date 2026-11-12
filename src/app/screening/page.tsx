@@ -1,37 +1,75 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getActiveUser, type SafeUser } from "@/lib/auth/auth";
+import { ProfileIconButton } from "@/components/ProfileIconButton";
+import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
 import { persistSessionToStorage } from "@/lib/storage/history";
 import {
-  createCptTrials,
-  calculateCptMetrics,
+  CLINICAL_DURATION_MS,
+  QUICK_DURATION_MS,
   calculateAttentionBlocks,
+  calculateClinicalStats,
+  calculateCptMetrics,
   classifyResponse,
-  DEMO_FIXTURE,
+  createStructuredCptTrials,
   type CptEvent,
   type CptTrial,
 } from "@/lib/cpt/engine";
-import { ASRS_QUESTIONS, ASRS_OPTIONS, scoreAsrs, type AsrsResult } from "@/lib/cpt/asrs";
+import { ASRS_OPTIONS, ASRS_QUESTIONS, scoreAsrs, type AsrsResult } from "@/lib/cpt/asrs";
+import {
+  formatSubjectContextLabel,
+  getDefaultTimeOfDay,
+  type ScreenExposure,
+  type SleepDuration,
+  type SubjectContext,
+  type TestMode,
+} from "@/lib/cpt/context";
 import { useGazeTracking } from "@/lib/gaze/tracking";
+import type { GazeSample } from "@/lib/gaze/quality";
 import { buildSessionExport } from "@/lib/export/session";
 
 type Phase = "questionnaire" | "ready" | "running" | "results";
 type Trial = CptEvent;
 
-const TEST_DURATION = 60_000;
+type ApiAnalysis = {
+  source?: string;
+  layperson_insight: {
+    stamina_headline: string;
+    stamina_description: string;
+    reaction_style_headline: string;
+    reaction_style_description: string;
+    actionable_habits: string[];
+  };
+  clinical_referral: {
+    diagnostic_impression: string;
+    asrs_clinical_correlation: string;
+    cpt_psychometric_note: string;
+    gaze_stability_note: string;
+    provisional_recommendations: string[];
+    formal_limitations: string[];
+  };
+};
 
-const DEMO_STABLE_TRACE: Array<{ x: number; y: number; valid: boolean }> = Array.from({ length: 48 }, (_, i) => ({
-  x: 0.5 + Math.sin(i * 0.4) * 0.035 + ((i * 13) % 7 - 3) * 0.004,
-  y: 0.5 + Math.cos(i * 0.4) * 0.035 + ((i * 17) % 7 - 3) * 0.004,
+const PRACTICE_SEQUENCE: Array<{ kind: "go" | "no-go"; delayMs: number }> = [
+  { kind: "go", delayMs: 1200 },
+  { kind: "go", delayMs: 1300 },
+  { kind: "no-go", delayMs: 1400 },
+  { kind: "go", delayMs: 1200 },
+  { kind: "no-go", delayMs: 1400 },
+  { kind: "go", delayMs: 1200 },
+];
+
+const DEMO_STABLE_TRACE: GazeSample[] = Array.from({ length: 64 }, (_, i) => ({
+  x: 0.5 + Math.sin(i * 0.4) * 0.035 + (((i * 13) % 7) - 3) * 0.004,
+  y: 0.5 + Math.cos(i * 0.4) * 0.035 + (((i * 17) % 7) - 3) * 0.004,
   valid: true,
 }));
 
-const DEMO_VARIABLE_TRACE: Array<{ x: number; y: number; valid: boolean }> = Array.from({ length: 48 }, (_, i) => ({
-  x: 0.5 + Math.sin(i * 0.7) * 0.2 + ((i * 11) % 5 - 2) * 0.025,
-  y: 0.5 + Math.cos(i * 0.5) * 0.16 + ((i * 13) % 5 - 2) * 0.025,
+const DEMO_VARIABLE_TRACE: GazeSample[] = Array.from({ length: 64 }, (_, i) => ({
+  x: 0.5 + Math.sin(i * 0.7) * 0.22 + (((i * 11) % 5) - 2) * 0.03,
+  y: 0.5 + Math.cos(i * 0.5) * 0.18 + (((i * 13) % 5) - 2) * 0.03,
   valid: i % 8 !== 0,
 }));
 
@@ -47,79 +85,73 @@ function formatSessionDate(value: number | null) {
   return value ? new Date(value).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" }) : "Belum dimulai";
 }
 
-function subscribeToDevice() {
-  return () => undefined;
-}
-function getDeviceStatus() {
-  if (typeof window === "undefined") return "Menyiapkan browser…";
-  return !window.isSecureContext && window.location.hostname !== "localhost"
-    ? "Kamera perlu HTTPS"
-    : !navigator.mediaDevices?.getUserMedia
-    ? "Kamera tidak didukung"
-    : "Browser siap";
-}
-function getServerDeviceStatus() {
-  return "Menyiapkan browser…";
-}
-
 export default function ScreeningPage() {
-  const [phase, setPhase] = useState<Phase>("questionnaire");
-  const [user, setUser] = useState<SafeUser | null>(null);
-  const [consent, setConsent] = useState(false);
+  const [phase, setPhase] = useState<Phase>("ready");
+  const user = useSyncExternalStore<SafeUser | null>(
+    subscribeAuth,
+    getActiveUser,
+    () => null
+  );
 
-  // 4-Step Pre-Flight Integrity Checklist States
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [isFocusShieldActive, setIsFocusShieldActive] = useState(false);
+  // Tier 1: ASRS (Sesi 1: 1 page per question) & Tier 3: Physiological Context + Mode
+  const [asrsStep, setAsrsStep] = useState<number>(0);
+  const [asrsAnswers, setAsrsAnswers] = useState<Record<number, number>>({});
+  const [asrsResult, setAsrsResult] = useState<AsrsResult | null>(null);
+  const [sleepHours] = useState<SleepDuration>("6-8");
+  const [caffeineRecent] = useState<boolean>(false);
+  const [screenTimeHours] = useState<ScreenExposure>("2-5");
+  const [testMode] = useState<TestMode>("clinical");
+
+  // Tier 2 Pre-flight Integrity & Environmental Protocol
+  const [consent, setConsent] = useState(false);
+  const [skipCamera, setSkipCamera] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [isTestPaused, setIsTestPaused] = useState(false);
   const [tabDistractionCount, setTabDistractionCount] = useState(0);
-  const [asrsAnswers, setAsrsAnswers] = useState<Record<number, number>>({ 1: 2, 2: 2, 3: 1, 4: 2, 5: 1, 6: 1 });
-  const [asrsResult, setAsrsResult] = useState<AsrsResult | null>(null);
 
-  const [practiceStep, setPracticeStep] = useState<"go" | "no-go" | "done">("go");
+  // Guided Timed Practice (6 real 250ms flash trials)
+  const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
+  const [practiceStimulusVisible, setPracticeStimulusVisible] = useState(false);
+  const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
+  const [, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
+  const [practiceScore, setPracticeScore] = useState(0);
+  const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
+  const practiceCorrectRef = useRef(0);
+  const practiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const practiceFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runPracticeStepRef = useRef<(idx: number) => void>(() => undefined);
+
+  // Main CPT Running State
+  const [trial, setTrial] = useState<Trial | null>(null);
+  const [stimulusVisible, setStimulusVisible] = useState(false);
+  const [trials, setTrials] = useState<Trial[]>([]);
+  const [, setFeedback] = useState("");
+
+  // Results & AI State
   const [analysisMode, setAnalysisMode] = useState<"layperson" | "clinical">("layperson");
-
-  type ApiAnalysis = {
-    layperson_insight: {
-      stamina_headline: string;
-      stamina_description: string;
-      reaction_style_headline: string;
-      reaction_style_description: string;
-      actionable_habits: string[];
-    };
-    clinical_referral: {
-      diagnostic_impression: string;
-      asrs_clinical_correlation: string;
-      cpt_psychometric_note: string;
-      gaze_stability_note: string;
-      provisional_recommendations: string[];
-      formal_limitations: string[];
-    };
-  };
-
   const [analysis, setAnalysis] = useState<ApiAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState(false);
-
   const [isDemo, setIsDemo] = useState(false);
   const [demoProfile, setDemoProfile] = useState<"stable" | "variable">("variable");
   const [sessionId, setSessionId] = useState("");
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
-
-  const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
-  const [trial, setTrial] = useState<Trial | null>(null);
-  const [stimulusVisible, setStimulusVisible] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState(60);
-  const [trials, setTrials] = useState<Trial[]>([]);
-  const [feedback, setFeedback] = useState("Tekan hanya saat lingkaran hijau muncul.");
+  const [actualDurationSec, setActualDurationSec] = useState(360);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const plannedTrials = useRef<CptTrial[]>(createCptTrials(DEMO_FIXTURE));
-  const gaze = useGazeTracking(videoRef, cameraStatus === "ready");
+  const plannedTrials = useRef<CptTrial[]>(createStructuredCptTrials("clinical"));
+
+  // Record gaze samples ONLY during active running phase when not paused
+  const gaze = useGazeTracking(videoRef, cameraStatus === "ready", phase === "running" && !isTestPaused);
 
   const trialIndex = useRef(0);
   const startedAt = useRef(0);
+  const pauseStartedAt = useRef<number | null>(null);
+  const pausedAccumulatedMs = useRef(0);
+  const targetDurationMs = useRef(CLINICAL_DURATION_MS);
   const showTrialRef = useRef<() => void>(() => undefined);
+  const endSessionRef = useRef<() => void>(() => undefined);
   const trialTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -127,68 +159,25 @@ export default function ScreeningPage() {
   const trialsRef = useRef<Trial[]>([]);
   const activeTrialRef = useRef<Trial | null>(null);
 
-  useEffect(() => {
-    setUser(getActiveUser());
+  const subjectContext: SubjectContext = useMemo(
+    () => ({
+      sleepHours,
+      caffeineRecent,
+      screenTimeHours,
+      timeOfDay: getDefaultTimeOfDay(),
+      testMode,
+    }),
+    [sleepHours, caffeineRecent, screenTimeHours, testMode]
+  );
+
+  const clearTimers = useCallback(() => {
+    if (trialTimer.current) clearTimeout(trialTimer.current);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    if (endTimer.current) clearTimeout(endTimer.current);
+    if (clockTimer.current) clearInterval(clockTimer.current);
+    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
+    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
   }, []);
-
-  const requestFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-        setIsFullscreen(true);
-      } else {
-        setIsFullscreen(true);
-      }
-    } catch {
-      // Fallback if browser denies
-      setIsFullscreen(true);
-    }
-  };
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
-
-  // Window Focus & Visibility Shield Detection
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden && phase === "running") {
-        setIsTestPaused(true);
-        setTabDistractionCount((prev) => prev + 1);
-      }
-    };
-
-    const handleWindowBlur = () => {
-      if (phase === "running") {
-        setIsTestPaused(true);
-        setTabDistractionCount((prev) => prev + 1);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleWindowBlur);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleWindowBlur);
-    };
-  }, [phase]);
-
-  const enableCamera = async () => {
-    if (!consent) return;
-    setCameraStatus("starting");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-      streamRef.current = stream;
-      setCameraStatus("ready");
-    } catch {
-      setCameraStatus("denied");
-    }
-  };
 
   const stopCamera = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -197,6 +186,21 @@ export default function ScreeningPage() {
     setCameraStatus("off");
   }, []);
 
+  const enableCamera = async () => {
+    setCameraStatus("starting");
+    setSkipCamera(false);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      setCameraStatus("ready");
+    } catch {
+      setCameraStatus("denied");
+    }
+  };
+
   useEffect(() => {
     if (cameraStatus !== "ready" || !videoRef.current || !streamRef.current) return;
     const video = videoRef.current;
@@ -204,49 +208,115 @@ export default function ScreeningPage() {
     void video.play().catch(() => setCameraStatus("denied"));
   }, [cameraStatus, phase]);
 
-  const clearTimers = useCallback(() => {
-    if (trialTimer.current) clearTimeout(trialTimer.current);
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    if (endTimer.current) clearTimeout(endTimer.current);
-    if (clockTimer.current) clearInterval(clockTimer.current);
-  }, []);
-
-  const showTrial = useCallback(() => {
-    if (isTestPaused) return;
-    if (Date.now() - startedAt.current >= TEST_DURATION) return;
-    const planned = plannedTrials.current[trialIndex.current % plannedTrials.current.length];
-    trialIndex.current += 1;
-    const next: Trial = { ...planned, shownAt: performance.now() };
-    const previous = activeTrialRef.current;
-    if (previous && !previous.response) {
-      const completed = { ...previous, response: classifyResponse(previous.kind, false) };
-      trialsRef.current = [...trialsRef.current, completed];
-      setTrials(trialsRef.current);
-    }
-    activeTrialRef.current = next;
-    setTrial(next);
-    setStimulusVisible(true);
-
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => {
-      setStimulusVisible(false);
-    }, 250);
-
-    setFeedback(next.kind === "go" ? "GO · tekan sekarang" : "NO-GO · tahan respons");
-    trialTimer.current = setTimeout(() => showTrialRef.current(), next.delayMs);
-  }, [isTestPaused]);
-
+  // Pause & resume management on tab-switch / window-blur
   useEffect(() => {
-    showTrialRef.current = showTrial;
-    if (phase === "running" && !isTestPaused && !activeTrialRef.current) {
-      showTrial();
-    }
-  }, [phase, isTestPaused, showTrial]);
+    const triggerPause = () => {
+      if (phase === "running" && !isTestPaused) {
+        setIsTestPaused(true);
+        setTabDistractionCount((prev) => prev + 1);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) triggerPause();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", triggerPause);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", triggerPause);
+    };
+  }, [phase, isTestPaused]);
 
-  const advancePractice = () => {
-    if (practiceStep === "go") setPracticeStep("no-go");
-    else if (practiceStep === "no-go") setPracticeStep("done");
-  };
+  // Handle pause timer accounting cleanly
+  useEffect(() => {
+    if (phase !== "running") return;
+    if (isTestPaused) {
+      if (pauseStartedAt.current === null) {
+        pauseStartedAt.current = Date.now();
+      }
+      clearTimers();
+    } else if (pauseStartedAt.current !== null) {
+      pausedAccumulatedMs.current += Date.now() - pauseStartedAt.current;
+      pauseStartedAt.current = null;
+      const elapsed = Date.now() - startedAt.current - pausedAccumulatedMs.current;
+      const remaining = Math.max(500, targetDurationMs.current - elapsed);
+      endTimer.current = setTimeout(() => endSessionRef.current(), remaining);
+      trialTimer.current = setTimeout(() => showTrialRef.current(), 900);
+    }
+  }, [isTestPaused, phase, clearTimers]);
+
+  const requestAnalysisWith = useCallback(
+    async (
+      targetEvents: Trial[],
+      targetAsrs: AsrsResult | null,
+      demoFlag: boolean,
+      durationSec: number,
+      tabInterruptionsCount: number
+    ) => {
+      setAnalysisLoading(true);
+      setAnalysisError(false);
+      const m = calculateCptMetrics(targetEvents);
+      const cStats = calculateClinicalStats(targetEvents);
+      const blocks = calculateAttentionBlocks(targetEvents);
+      try {
+        const response = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            test_version: "2.1",
+            test_mode: demoFlag ? "synthetic" : subjectContext.testMode,
+            duration_seconds: Math.max(1, durationSec),
+            tab_interruptions: demoFlag ? 0 : tabInterruptionsCount,
+            subject_context: demoFlag ? undefined : subjectContext,
+            asrs: targetAsrs
+              ? {
+                  total_score: targetAsrs.totalScore,
+                  significant_items: targetAsrs.significantCount,
+                  is_significant: targetAsrs.isSignificant,
+                }
+              : undefined,
+            cpt: {
+              go_trials: m.goTrials,
+              no_go_trials: m.noGoTrials,
+              hit_rate: m.hitRate,
+              omission_rate: m.omissionRate,
+              commission_rate: m.commissionRate,
+              median_rt_ms: m.medianReactionTimeMs,
+              rt_variability_ms: m.reactionTimeVariabilityMs,
+              d_prime: cStats.dPrime,
+              anticipatory_responses: cStats.anticipatoryResponses,
+              attention_lapses: cStats.attentionLapses,
+              fatigue_slope: cStats.fatigueSlope,
+              rt_slope_ms_per_block: cStats.rtSlopeMsPerBlock,
+            },
+            blocks: blocks.map((b) => ({
+              label: b.label,
+              phase: b.blockPhase,
+              hit_rate: b.hitRate,
+              commission_rate: b.commissionRate,
+              median_rt_ms: b.medianRtMs,
+            })),
+            gaze: {
+              status: demoFlag ? "unavailable" : gaze.quality.status,
+              data_coverage: demoFlag ? 0 : gaze.quality.coverage,
+              relative_dispersion: demoFlag ? 0 : gaze.quality.relativeDispersion,
+              out_of_bounds_rate: demoFlag ? 0 : gaze.outOfBoundsRate,
+            },
+          }),
+        });
+        if (response.ok) {
+          setAnalysis(await response.json());
+        } else {
+          setAnalysisError(true);
+        }
+      } catch {
+        setAnalysisError(true);
+      } finally {
+        setAnalysisLoading(false);
+      }
+    },
+    [subjectContext, gaze.quality, gaze.outOfBoundsRate]
+  );
 
   const endSession = useCallback(() => {
     const active = activeTrialRef.current;
@@ -255,88 +325,239 @@ export default function ScreeningPage() {
     }
     const finalTrials = trialsRef.current;
     const finalMetrics = calculateCptMetrics(finalTrials);
+    const finalStats = calculateClinicalStats(finalTrials);
+    const elapsedSec = Math.max(
+      1,
+      Math.round((Date.now() - startedAt.current - pausedAccumulatedMs.current) / 1000)
+    );
+
     setTrials(finalTrials);
     setTrial(null);
     setStimulusVisible(false);
+    setActualDurationSec(elapsedSec);
     setPhase("results");
     stopCamera();
     clearTimers();
 
-    // Auto-persist to history if user is logged in
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+
     const activeUsr = getActiveUser();
     if (activeUsr && !isDemo) {
       persistSessionToStorage({
         sessionId: sessionId || "OC-LOCAL",
         userId: activeUsr.id,
         date: Date.now(),
-        durationSeconds: 60,
+        durationSeconds: elapsedSec,
+        testMode: subjectContext.testMode,
         asrsTotalScore: asrsResult?.totalScore ?? 0,
         asrsSignificant: asrsResult?.isSignificant ?? false,
         medianRtMs: finalMetrics.medianReactionTimeMs,
         hitRate: finalMetrics.hitRate,
         omissions: finalMetrics.omissions,
         commissions: finalMetrics.commissions,
+        dPrime: finalStats.dPrime,
         gazeStatus: gaze.quality.status,
       });
     }
-  }, [clearTimers, stopCamera, isDemo, sessionId, asrsResult, gaze.quality.status]);
+
+    void requestAnalysisWith(finalTrials, asrsResult, false, elapsedSec, tabDistractionCount);
+  }, [
+    clearTimers,
+    stopCamera,
+    isDemo,
+    sessionId,
+    asrsResult,
+    gaze.quality.status,
+    subjectContext.testMode,
+    tabDistractionCount,
+    requestAnalysisWith,
+  ]);
+
+  useEffect(() => {
+    endSessionRef.current = endSession;
+  }, [endSession]);
+
+  const showTrial = useCallback(() => {
+    if (isTestPaused) return;
+    const elapsed = Date.now() - startedAt.current - pausedAccumulatedMs.current;
+    if (elapsed >= targetDurationMs.current) {
+      endSessionRef.current();
+      return;
+    }
+
+    // Close previous unresponded trial cleanly
+    const previous = activeTrialRef.current;
+    if (previous && !previous.response) {
+      const completed = { ...previous, response: classifyResponse(previous.kind, false) };
+      trialsRef.current = [...trialsRef.current, completed];
+      setTrials(trialsRef.current);
+    }
+
+    if (trialIndex.current >= plannedTrials.current.length) {
+      endSessionRef.current();
+      return;
+    }
+
+    const planned = plannedTrials.current[trialIndex.current];
+    trialIndex.current += 1;
+    const next: Trial = { ...planned, shownAt: performance.now() };
+    activeTrialRef.current = next;
+    setTrial(next);
+    setStimulusVisible(true);
+    setFeedback("Amati stimulus kilat · Fokus pada tanda (+)");
+
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => {
+      setStimulusVisible(false);
+    }, 250);
+
+    trialTimer.current = setTimeout(() => showTrialRef.current(), next.delayMs);
+  }, [isTestPaused]);
+
+  useEffect(() => {
+    showTrialRef.current = showTrial;
+  }, [showTrial]);
 
   const startTest = () => {
     if (!consent) return;
     clearTimers();
     gaze.reset();
+    const duration = subjectContext.testMode === "clinical" ? CLINICAL_DURATION_MS : QUICK_DURATION_MS;
+    targetDurationMs.current = duration;
+    plannedTrials.current = createStructuredCptTrials(subjectContext.testMode);
     startedAt.current = Date.now();
-    setSessionId(createSessionId());
+    pauseStartedAt.current = null;
+    pausedAccumulatedMs.current = 0;
+
+    const newId = createSessionId();
+    setSessionId(newId);
     setSessionStartedAt(Date.now());
     trialIndex.current = 0;
     trialsRef.current = [];
     activeTrialRef.current = null;
+    setTabDistractionCount(0);
+    setIsTestPaused(false);
     setAnalysis(null);
     setAnalysisError(false);
     setTrials([]);
     setTrial(null);
     setStimulusVisible(false);
-    setSecondsLeft(60);
     setPhase("running");
-    setFeedback("Siapkan fokusmu…");
+    setFeedback("Bersiap… fiksasikan mata pada tanda (+) di tengah layar.");
+
     trialTimer.current = setTimeout(() => showTrialRef.current(), 1200);
-    endTimer.current = setTimeout(endSession, TEST_DURATION);
+    endTimer.current = setTimeout(() => endSessionRef.current(), duration);
     clockTimer.current = setInterval(() => {
-      setSecondsLeft(Math.max(0, Math.ceil((TEST_DURATION - (Date.now() - startedAt.current)) / 1000)));
-    }, 250);
+      // internal clock tracking
+    }, 1000);
   };
+
+  // Guided Timed Flash Practice Engine
+  const runPracticeStep = (idx: number) => {
+    if (idx >= PRACTICE_SEQUENCE.length) {
+      const score = practiceCorrectRef.current;
+      setPracticeScore(score);
+      setPracticeKind(null);
+      setPracticeStimulusVisible(false);
+      if (score >= 4) {
+        setPracticeState("passed");
+        setPracticeFeedback(`Latihan lulus (${score}/${PRACTICE_SEQUENCE.length} benar). Kalibrasi motorik siap.`);
+      } else {
+        setPracticeState("retry");
+        setPracticeFeedback(`Akurasi latihan rendah (${score}/${PRACTICE_SEQUENCE.length}). Ulangi agar paham pola kilat 250ms.`);
+      }
+      return;
+    }
+
+    const step = PRACTICE_SEQUENCE[idx];
+    setPracticeKind(step.kind);
+    setPracticeStimulusVisible(true);
+    practiceActiveRef.current = { kind: step.kind, shownAt: performance.now(), responded: false };
+    setPracticeFeedback(step.kind === "go" ? "HIJAU: Tekan SPACE / Tombol sekarang!" : "MERAH: Tahan, jangan tekan!");
+
+    practiceFlashRef.current = setTimeout(() => {
+      setPracticeStimulusVisible(false);
+    }, 250);
+
+    practiceTimerRef.current = setTimeout(() => {
+      const active = practiceActiveRef.current;
+      if (active && !active.responded) {
+        if (active.kind === "no-go") {
+          practiceCorrectRef.current += 1;
+          setPracticeFeedback("Bagus! Berhasil menahan diri pada No-Go.");
+        } else {
+          setPracticeFeedback("Terlewat: target hijau terlalu cepat lewat.");
+        }
+      }
+      runPracticeStepRef.current(idx + 1);
+    }, step.delayMs);
+  };
+
+  useEffect(() => {
+    runPracticeStepRef.current = runPracticeStep;
+  });
+
+  const startGuidedPractice = () => {
+    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
+    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
+    practiceCorrectRef.current = 0;
+    practiceActiveRef.current = null;
+    setPracticeScore(0);
+    setPracticeState("running");
+    setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
+    practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
+  };
+
+  const handlePracticeRespond = useCallback(() => {
+    if (practiceState !== "running") return;
+    const active = practiceActiveRef.current;
+    if (!active || active.responded) return;
+    active.responded = true;
+    const rt = Math.round(performance.now() - active.shownAt);
+    if (active.kind === "go") {
+      practiceCorrectRef.current += 1;
+      setPracticeFeedback(`Tepat! (${rt} ms)`);
+    } else {
+      setPracticeFeedback("Salah tekan! Lingkaran merah harus ditahan.");
+    }
+  }, [practiceState]);
 
   const loadBenchmark = (profile: "stable" | "variable") => {
     clearTimers();
     stopCamera();
     gaze.reset();
-    const benchmark = plannedTrials.current.map((planned, index) => {
+    const structured = createStructuredCptTrials("clinical", 20261111);
+    const benchmark: Trial[] = structured.map((planned, index) => {
       const shownAt = index * planned.delayMs;
+      const blockIdx = planned.blockIndex ?? 0;
+      const isLateBlock = blockIdx >= 3;
       const shouldRespond =
-        profile === "stable" ? planned.kind === "go" : planned.kind === "go" ? index % 7 !== 0 : index % 5 === 0;
+        profile === "stable"
+          ? planned.kind === "go"
+            ? index % 29 !== 0
+            : false
+          : planned.kind === "go"
+          ? isLateBlock
+            ? index % 3 !== 0
+            : index % 8 !== 0
+          : isLateBlock && index % 4 === 0;
+      const baseRt = profile === "stable" ? 365 + (index % 5) * 14 : 420 + blockIdx * 28 + (index % 7) * 35;
       return {
         ...planned,
         shownAt,
         ...(shouldRespond
           ? {
-              respondedAt: shownAt + (planned.kind === "go" ? 380 + (index % 4) * 30 : 190),
+              respondedAt: shownAt + (planned.kind === "go" ? baseRt : 195),
               response: classifyResponse(planned.kind, true),
             }
           : { response: classifyResponse(planned.kind, false) }),
       };
     });
-    trialsRef.current = benchmark;
-    setSessionId(`DEMO-${profile.toUpperCase()}`);
-    setSessionStartedAt(null);
-    setAnalysis(null);
-    setAnalysisError(false);
-    setTrials(benchmark);
-    setTrial(null);
-    setStimulusVisible(false);
-    setIsDemo(true);
-    setDemoProfile(profile);
-    setAsrsResult({
-      totalScore: profile === "stable" ? 6 : 16,
+
+    const demoAsrs: AsrsResult = {
+      totalScore: profile === "stable" ? 6 : 17,
       significantCount: profile === "stable" ? 1 : 5,
       isSignificant: profile !== "stable",
       interpretationLay:
@@ -347,12 +568,30 @@ export default function ScreeningPage() {
         profile === "stable"
           ? "Skor ASRS v1.1 Part A menunjukkan 1/6 item positif (normal)."
           : "Skor ASRS v1.1 Part A menunjukkan 5/6 item positif (signifikan secara klinis).",
-    });
+    };
+
+    trialsRef.current = benchmark;
+    setSessionId(`DEMO-${profile.toUpperCase()}`);
+    setSessionStartedAt(null);
+    setActualDurationSec(360);
+    setAnalysis(null);
+    setAnalysisError(false);
+    setTrials(benchmark);
+    setTrial(null);
+    setStimulusVisible(false);
+    setIsDemo(true);
+    setDemoProfile(profile);
+    setAsrsResult(demoAsrs);
     setPhase("results");
+    void requestAnalysisWith(benchmark, demoAsrs, true, 360, 0);
   };
 
   const respond = useCallback(() => {
-    if (phase !== "running") return;
+    if (phase === "ready" && practiceState === "running") {
+      handlePracticeRespond();
+      return;
+    }
+    if (phase !== "running" || isTestPaused) return;
     const active = activeTrialRef.current;
     if (!active || active.response) return;
     const response: Trial["response"] = active.kind === "go" ? "hit" : "commission";
@@ -361,32 +600,41 @@ export default function ScreeningPage() {
     trialsRef.current = [...trialsRef.current, completed];
     setTrials(trialsRef.current);
     setFeedback(response === "hit" ? "Tepat ✓" : "Terburu-buru · tahan saat merah");
-  }, [phase]);
+  }, [phase, isTestPaused, practiceState, handlePracticeRespond]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.code === "Space") {
+      if (event.code === "Space" && (phase === "running" || (phase === "ready" && practiceState === "running"))) {
         event.preventDefault();
         respond();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [respond]);
+  }, [respond, phase, practiceState]);
 
   useEffect(() => () => {
     clearTimers();
     stopCamera();
   }, [clearTimers, stopCamera]);
 
-  const metrics = calculateCptMetrics(trials);
-  const attentionBlocks = calculateAttentionBlocks(trials);
-  const deviceCheck = useSyncExternalStore(subscribeToDevice, getDeviceStatus, getServerDeviceStatus);
+  const metrics = useMemo(() => calculateCptMetrics(trials), [trials]);
+  const clinicalStats = useMemo(() => calculateClinicalStats(trials), [trials]);
+  const attentionBlocks = useMemo(() => calculateAttentionBlocks(trials), [trials]);
+
+  const currentBlockNumber = (trial?.blockIndex ?? 0) + 1;
+  const totalBlocksCount = subjectContext.testMode === "clinical" ? 6 : 3;
 
   const printSummary = () => window.print();
 
   const downloadJson = () => {
-    const exportPayload = buildSessionExport(sessionId, isDemo, metrics, gaze.quality, asrsResult);
+    const exportPayload = buildSessionExport(sessionId, isDemo, metrics, gaze.quality, asrsResult, {
+      clinicalStats,
+      subjectContext,
+      durationSeconds: actualDurationSec,
+      tabInterruptions: tabDistractionCount,
+      outOfBoundsRate: gaze.outOfBoundsRate,
+    });
     const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -396,56 +644,20 @@ export default function ScreeningPage() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
-  const requestAnalysis = useCallback(async () => {
-    setAnalysisLoading(true);
-    setAnalysisError(false);
-    try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          test_version: "2.0",
-          duration_seconds: 60,
-          asrs: asrsResult
-            ? {
-                total_score: asrsResult.totalScore,
-                significant_items: asrsResult.significantCount,
-                is_significant: asrsResult.isSignificant,
-              }
-            : undefined,
-          cpt: {
-            go_trials: metrics.goTrials,
-            no_go_trials: metrics.noGoTrials,
-            hit_rate: metrics.hitRate,
-            omission_rate: metrics.omissionRate,
-            commission_rate: metrics.commissionRate,
-            median_rt_ms: metrics.medianReactionTimeMs,
-            rt_variability_ms: metrics.reactionTimeVariabilityMs,
-          },
-          gaze: {
-            status: isDemo ? "unavailable" : gaze.quality.status,
-            data_coverage: isDemo ? 0 : gaze.quality.coverage,
-            relative_dispersion: isDemo ? 0 : gaze.quality.relativeDispersion,
-          },
-        }),
-      });
-      if (response.ok) {
-        setAnalysis(await response.json());
-      } else {
-        setAnalysisError(true);
-      }
-    } catch {
-      setAnalysisError(true);
-    } finally {
-      setAnalysisLoading(false);
-    }
-  }, [asrsResult, metrics, isDemo, gaze.quality]);
+  const proceedToSesi1 = () => {
+    setAsrsStep(0);
+    setPhase("questionnaire");
+  };
 
-  const submitAsrsAndProceed = () => {
+  const finishSesi1AndStartCpt = () => {
     const scored = scoreAsrs(asrsAnswers);
     setAsrsResult(scored);
-    setPhase("ready");
+    setIsDemo(false);
+    startTest();
   };
+
+  const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
+  const currentAsrsAnswered = asrsAnswers[currentAsrsQuestion.id] !== undefined;
 
   return (
     <main className="site-shell screening-shell">
@@ -457,21 +669,19 @@ export default function ScreeningPage() {
         <div className="nav-center-menu">
           <Link href="/">Beranda</Link>
           <span className="status-pill">
-            {phase === "questionnaire"
-              ? "1/3 KUESIONER KRONIS"
-              : phase === "ready"
-              ? "2/3 PRE-FLIGHT INTEGRITY"
+            {phase === "ready"
+              ? "PERSIAPAN & KALIBRASI"
+              : phase === "questionnaire"
+              ? `SESI 1 · SOAL ${asrsStep + 1}/${ASRS_QUESTIONS.length}`
               : phase === "running"
-              ? "3/3 TES BERJALAN"
+              ? `SESI 2 · BLOK ${currentBlockNumber}/${totalBlocksCount}`
               : "RINGKASAN HASIL"}
           </span>
         </div>
         <div className="nav-right-actions">
           <ThemeToggle />
           {user ? (
-            <Link className="text-link" href="/dashboard">
-              Dashboard ({user.name.split(" ")[0]})
-            </Link>
+            <ProfileIconButton user={user} />
           ) : (
             <Link className="text-link" href="/login">
               Masuk
@@ -480,228 +690,249 @@ export default function ScreeningPage() {
         </div>
       </nav>
 
-      {/* PHASE 1: WHO ASRS Questionnaire */}
+      {/* STEP 2 (SESI 1): WHO ASRS - Zen Likert Scale 1 Soal per Halaman */}
       {phase === "questionnaire" && (
-        <section className="screening-content">
-          <div className="status-pill">
-            <span className="status-dot" /> Tahap 1 dari 3: Pengenalan Gejala Harian
-          </div>
-          <h1 style={{ color: "var(--text-primary)" }}>
-            Bagaimana pola fokusmu <em>6 bulan terakhir?</em>
-          </h1>
-          <p className="hero-lede">
-            Sebelum tes refleks dimulai, jawab 6 pertanyaan baku WHO (ASRS v1.1) berikut. Ini membantu membedakan apakah
-            sulit fokusmu hanya kelelahan sesaat hari ini atau kebiasaan yang berulang.
-          </p>
+        <section className="lab-viewport">
+          <div className="lab-frame">
+            <div className="lab-header">
+              <span className="lab-tag">KUESIONER WHO ASRS v1.1</span>
+              <span className="lab-step-indicator">
+                SOAL {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
+              </span>
+            </div>
 
-          <div className="questionnaire-box">
-            {ASRS_QUESTIONS.map((q) => (
-              <div className="question-item" key={q.id}>
-                <div className="question-text">
-                  <span>{q.id}. </span>
-                  {q.question}
-                </div>
-                <div className="options-grid">
-                  {ASRS_OPTIONS.map((opt) => (
-                    <button
-                      type="button"
-                      key={opt.value}
-                      className={`option-btn ${(asrsAnswers[q.id] ?? 0) === opt.value ? "selected" : ""}`}
-                      onClick={() => setAsrsAnswers((prev) => ({ ...prev, [q.id]: opt.value }))}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
+            <div className="question-statement">
+              {currentAsrsQuestion.question}
+            </div>
 
-          <div className="hero-actions" style={{ marginTop: "24px" }}>
-            <button className="primary-button" onClick={submitAsrsAndProceed}>
-              Simpan & Lanjut ke Latihan Refleks <span aria-hidden="true">→</span>
-            </button>
-            <button className="secondary-button" onClick={() => loadBenchmark("stable")}>
-              Muat Demo Cepat (Benchmark Stabil)
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* PHASE 2: Ready & 4-Step Pre-Flight Integrity Checklist */}
-      {phase === "ready" && (
-        <section className="screening-content">
-          <div className="status-pill">
-            <span className="status-dot" /> Tahap 2 dari 3: Verifikasi Integritas Pengujian
-          </div>
-          <h1 style={{ color: "var(--text-primary)" }}>
-            Standar lingkungan tes <em>terkontrol.</em>
-          </h1>
-          <p className="hero-lede">
-            Untuk memastikan data atensi objektif dan bebas bias gangguan luar, pastikan 4 syarat integritas di bawah ini
-            terpenuhi sebelum memulai sesi 60 detik.
-          </p>
-
-          {/* 4-Step Pre-Flight Checklist Card */}
-          <div className="questionnaire-box" style={{ marginBottom: "20px" }}>
-            <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 16px", color: "var(--text-primary)" }}>
-              Checklist Kesiapan Pengujian
-            </h3>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              {/* Syarat 1: Kamera Wajah Aktif */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid var(--surface-border-subtle)" }}>
-                <div>
-                  <strong style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>1. Kamera Deteksi Fiksasi Wajah</strong>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                    {cameraStatus === "ready"
-                      ? `Kamera aktif (${deviceCheck}). Privasi terjaga tanpa pengunggahan video.`
-                      : `Wajib diaktifkan (${deviceCheck}) untuk mengukur kestabilan okulomotor saat stimulus muncul.`}
-                  </p>
-                </div>
-                {cameraStatus === "ready" ? (
-                  <span className="badge-live" style={{ padding: "4px 10px", fontSize: "0.75rem" }}>Aktif ✓</span>
-                ) : (
-                  <button type="button" className="secondary-button" style={{ padding: "6px 14px", fontSize: "0.78rem" }} onClick={enableCamera}>
-                    {cameraStatus === "starting" ? "Menghubungkan…" : "Aktifkan Kamera"}
-                  </button>
-                )}
-              </div>
-
-              {/* Syarat 2: Layar Penuh (Fullscreen) */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid var(--surface-border-subtle)" }}>
-                <div>
-                  <strong style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>2. Mode Layar Penuh (Fullscreen Lock)</strong>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                    Menghilangkan distraksi bilah navigasi dan toolbar peramban.
-                  </p>
-                </div>
-                {isFullscreen ? (
-                  <span className="badge-live" style={{ padding: "4px 10px", fontSize: "0.75rem" }}>Layar Penuh ✓</span>
-                ) : (
-                  <button type="button" className="secondary-button" style={{ padding: "6px 14px", fontSize: "0.78rem" }} onClick={requestFullscreen}>
-                    Aktifkan Fullscreen
-                  </button>
-                )}
-              </div>
-
-              {/* Syarat 3: Pelindung Fokus Anti-Pindah Tab */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid var(--surface-border-subtle)" }}>
-                <div>
-                  <strong style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>3. Focus Shield (Anti-Pindah Halaman)</strong>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                    Sistem akan otomatis menjeda tes dan mencatat pelanggaran jika kamu berpindah tab atau meminimize layar.
-                  </p>
-                </div>
+            <div className="likert-scale">
+              {ASRS_OPTIONS.map((opt) => (
                 <button
                   type="button"
-                  className={isFocusShieldActive ? "badge-live" : "secondary-button"}
-                  style={{ padding: "6px 14px", fontSize: "0.78rem" }}
-                  onClick={() => setIsFocusShieldActive(true)}
+                  key={opt.value}
+                  className={`likert-btn ${asrsAnswers[currentAsrsQuestion.id] === opt.value ? "selected" : ""}`}
+                  onClick={() => setAsrsAnswers((prev) => ({ ...prev, [currentAsrsQuestion.id]: opt.value }))}
                 >
-                  {isFocusShieldActive ? "Shield Aktif ✓" : "Kunci Fokus Tab"}
+                  <span className="scale-num">0{opt.value}</span>
+                  <span>{opt.label}</span>
                 </button>
-              </div>
-
-              {/* Syarat 4: Kesiapan Sistem & Rekam Sesi */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <strong style={{ fontSize: "0.88rem", color: "var(--text-primary)" }}>4. Latihan Stimulus Go/No-Go</strong>
-                  <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                    {practiceStep === "done" ? "Latihan berhasil diselesaikan." : "Selesaikan simulasi target hijau/merah di bawah."}
-                  </p>
-                </div>
-                {practiceStep === "done" ? (
-                  <span className="badge-live" style={{ padding: "4px 10px", fontSize: "0.75rem" }}>Siap ✓</span>
-                ) : (
-                  <span style={{ fontSize: "0.75rem", color: "var(--coral-danger)", fontFamily: "var(--font-mono)" }}>Belum Selesai</span>
-                )}
-              </div>
+              ))}
             </div>
-          </div>
 
-          <div className="setup-card">
-            <strong>Latihan Cepat Respon Motorik</strong>
-            <p style={{ margin: "6px 0 14px", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
-              {practiceStep === "go"
-                ? "Simulasi Go: Lingkaran hijau menyala sejenak lalu kembali ke tanda plus (+). Tekan tombol."
-                : practiceStep === "no-go"
-                ? "Simulasi No-Go: Lingkaran merah menyala sejenak. Tahan jarimu, jangan menekan."
-                : "Latihan selesai! Sensor saraf motorikmu sudah terkalibrasi untuk sesi penuh."}
-            </p>
-            {practiceStep !== "done" ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                <div
-                  style={{
-                    width: "36px",
-                    height: "36px",
-                    borderRadius: "50%",
-                    background: practiceStep === "go" ? "var(--accent-teal)" : "var(--coral-danger)",
-                  }}
-                />
-                <button type="button" className="secondary-button" onClick={advancePractice}>
-                  {practiceStep === "go" ? "Coba Tekan Target Hijau" : "Saya Paham Target Merah Ditahan"}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "20px", borderTop: "1px solid var(--surface-border-subtle)" }}>
+              {asrsStep > 0 ? (
+                <button type="button" className="secondary-button" style={{ padding: "8px 18px", fontSize: "0.82rem" }} onClick={() => setAsrsStep((s) => Math.max(0, s - 1))}>
+                  ← Kembali
                 </button>
-              </div>
-            ) : (
-              <span style={{ color: "var(--accent-teal)", fontWeight: 700, fontSize: "0.85rem" }}>
-                Kalibrasi Motorik Selesai ✓
-              </span>
-            )}
-          </div>
+              ) : (
+                <button type="button" className="secondary-button" style={{ padding: "8px 18px", fontSize: "0.82rem" }} onClick={() => setPhase("ready")}>
+                  ← Persiapan
+                </button>
+              )}
 
-          <label
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              gap: "10px",
-              margin: "20px 0",
-              fontSize: "0.82rem",
-              color: "var(--text-secondary)",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(e) => setConsent(e.target.checked)}
-              style={{ marginTop: "2px", accentColor: "var(--accent-teal)" }}
-            />
-            <span>
-              Saya memahami bahwa OculiCare adalah instrumen pengukur performa awal (termometer atensi), bukan vonis
-              medis atau diagnosis ADHD mandiri.
-            </span>
-          </label>
-
-          <div className="hero-actions" style={{ marginTop: "24px" }}>
-            <button
-              className="primary-button"
-              disabled={!consent || practiceStep !== "done" || !isFocusShieldActive || cameraStatus !== "ready"}
-              onClick={() => {
-                setIsDemo(false);
-                startTest();
-              }}
-            >
-              Mulai Tes 60 Detik Terkontrol <span aria-hidden="true">→</span>
-            </button>
-            <button className="text-link" onClick={() => setPhase("questionnaire")}>
-              ← Ubah Jawaban Kuesioner
-            </button>
+              {asrsStep < ASRS_QUESTIONS.length - 1 ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ padding: "8px 22px", fontSize: "0.84rem" }}
+                  disabled={!currentAsrsAnswered}
+                  onClick={() => setAsrsStep((s) => Math.min(ASRS_QUESTIONS.length - 1, s + 1))}
+                >
+                  Lanjut →
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ padding: "8px 22px", fontSize: "0.84rem" }}
+                  disabled={!currentAsrsAnswered}
+                  onClick={finishSesi1AndStartCpt}
+                >
+                  Mulai Pengecekan CPT →
+                </button>
+              )}
+            </div>
           </div>
         </section>
       )}
 
-      {/* PHASE 3: CPT Running Stage (Zero-Scroll Adaptive) */}
+      {/* STEP 1 (PERSIAPAN): Minimalist Optical HUD Reticle & Clean Sensors */}
+      {phase === "ready" && (
+        <section className="lab-viewport">
+          <div className="lab-frame">
+            <div className="lab-header">
+              <span className="lab-tag">STANDARDISASI SENSOR &amp; KALIBRASI</span>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ padding: "4px 10px", fontSize: "0.72rem", borderStyle: "dashed" }}
+                onClick={() => loadBenchmark("stable")}
+                title="Muat data sampel untuk demonstrasi"
+              >
+                Demo Benchmark
+              </button>
+            </div>
+
+            {/* Circular Optical Reticle */}
+            <div className="reticle-container">
+              {cameraStatus === "ready" ? (
+                <video ref={videoRef} muted playsInline />
+              ) : (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", textAlign: "center", padding: "16px" }}>
+                  <div style={{ fontSize: "1.6rem", marginBottom: "6px" }}>⊙</div>
+                  Kamera Standby
+                </div>
+              )}
+              <div className="reticle-crosshair" />
+            </div>
+
+            {/* 3 Discrete Sensor Status Indicators */}
+            <div className="sensor-bar">
+              <div className="sensor-item">
+                <span
+                  className={`sensor-dot-light ${
+                    cameraStatus === "ready"
+                      ? gaze.env.brightness >= 30
+                        ? "active"
+                        : "warning"
+                      : "danger"
+                  }`}
+                />
+                <span>CAHAYA</span>
+              </div>
+              <div className="sensor-item">
+                <span
+                  className={`sensor-dot-light ${
+                    cameraStatus === "ready"
+                      ? gaze.env.face.faceCentered
+                        ? "active"
+                        : "warning"
+                      : "danger"
+                  }`}
+                />
+                <span>JARAK</span>
+              </div>
+              <div className="sensor-item">
+                <span
+                  className={`sensor-dot-light ${
+                    cameraStatus === "ready" && gaze.status === "tracking" ? "active" : "danger"
+                  }`}
+                />
+                <span>MATA</span>
+              </div>
+            </div>
+
+            {/* Minimalist Controls */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "28px" }}>
+              {cameraStatus !== "ready" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ padding: "9px 20px", fontSize: "0.82rem" }}
+                  onClick={enableCamera}
+                  disabled={cameraStatus === "starting"}
+                >
+                  {cameraStatus === "starting" ? "Menghubungkan…" : "Aktifkan Sensor Kamera"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ padding: "9px 20px", fontSize: "0.82rem" }}
+                  onClick={stopCamera}
+                >
+                  Matikan Kamera
+                </button>
+              )}
+              <button
+                type="button"
+                className={skipCamera ? "badge-live" : "secondary-button"}
+                style={{ padding: "9px 18px", fontSize: "0.82rem" }}
+                onClick={() => setSkipCamera((prev) => !prev)}
+              >
+                {skipCamera ? "Mode Tanpa Kamera ✓" : "Tanpa Kamera"}
+              </button>
+            </div>
+
+            {/* Subtle Practice & Consent Strip */}
+            <div style={{ background: "var(--surface-elevated)", borderRadius: "10px", padding: "14px 18px", border: "1px solid var(--surface-border)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", marginBottom: "24px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    borderRadius: "50%",
+                    background: practiceStimulusVisible
+                      ? practiceKind === "go"
+                        ? "#10b981"
+                        : "#ef4444"
+                      : "var(--surface-border)",
+                    transition: "background 0.08s ease",
+                  }}
+                />
+                <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+                  {practiceState === "running"
+                    ? "Tekan [SPACE] saat HIJAU"
+                    : practiceState === "passed"
+                    ? `Latihan Motorik Lolos (${practiceScore}/6) ✓`
+                    : "Uji coba respon stimulus kilat 250ms"}
+                </span>
+              </div>
+              {practiceState === "running" ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                  onClick={handlePracticeRespond}
+                >
+                  RESPON
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  style={{ padding: "6px 14px", fontSize: "0.78rem" }}
+                  onClick={startGuidedPractice}
+                >
+                  {practiceState === "passed" ? "Ulangi" : "Coba (6x)"}
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "20px", borderTop: "1px solid var(--surface-border-subtle)" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "0.8rem", color: "var(--text-secondary)", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)}
+                  style={{ accentColor: "var(--accent-teal)" }}
+                />
+                Setuju instrumen penapisan non-medis
+              </label>
+
+              <button
+                className="primary-button"
+                style={{ padding: "11px 26px", fontSize: "0.9rem", fontWeight: 700 }}
+                disabled={!consent || (!skipCamera && cameraStatus !== "ready")}
+                onClick={proceedToSesi1}
+              >
+                Mulai Sesi 1 (Kuesioner) →
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* PHASE 3: Pure Sensory Blind CPT Stage (Zero Clutter, Precision Geometric Focus) */}
       {phase === "running" && (
-        <section className="cpt-viewport" aria-live="polite">
-          {/* PAUSED / TAB SWITCH WARNING MODAL */}
+        <section className="pure-cpt-canvas" aria-live="polite">
           {isTestPaused && (
             <div
               style={{
                 position: "absolute",
                 inset: 0,
-                zIndex: 50,
-                background: "rgba(9, 11, 14, 0.92)",
-                backdropFilter: "blur(8px)",
+                zIndex: 110,
+                background: "rgba(5, 7, 10, 0.96)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -710,83 +941,59 @@ export default function ScreeningPage() {
                 textAlign: "center",
               }}
             >
-              <div className="status-pill" style={{ color: "var(--coral-danger)", borderColor: "var(--coral-danger)", marginBottom: "16px" }}>
-                PERINGATAN INTEGRITAS PENGUJIAN
-              </div>
-              <h2 style={{ fontSize: "1.6rem", fontWeight: 700, margin: "0 0 10px", color: "#ffffff" }}>
-                Tes Dijeda: Terdeteksi Berpindah Halaman!
+              <h2 style={{ fontSize: "1.4rem", fontWeight: 700, margin: "0 0 10px", color: "#ffffff" }}>
+                Tes Dijeda: Fokus Layar Terputus
               </h2>
-              <p style={{ maxWidth: "480px", color: "var(--text-secondary)", fontSize: "0.88rem", lineHeight: 1.5, margin: "0 0 24px" }}>
-                Jendela browser kehilangan fokus. Untuk menjaga keabsahan data observasi waktu reaksi, kamu tidak boleh
-                membuka tab lain selama 60 detik. Pelanggaran tercatat: {tabDistractionCount} kali.
+              <p style={{ maxWidth: "420px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5, margin: "0 0 24px" }}>
+                Jendela browser kehilangan fokus. Waktu dijaga akurat tanpa mengurangi durasi. Interupsi: {tabDistractionCount}x.
               </p>
               <button
                 type="button"
                 className="primary-button"
-                onClick={() => {
-                  setIsTestPaused(false);
-                }}
+                onClick={() => setIsTestPaused(false)}
               >
-                Kembali & Lanjutkan Tes →
+                Lanjutkan Tes →
               </button>
             </div>
           )}
 
-          <div className="cpt-topbar">
-            <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.08em", color: "var(--muted)" }}>
-              SESI TES REFLEKS AKTIF
-            </span>
-            <span className="cpt-timer">{secondsLeft}s</span>
-          </div>
+          {cameraStatus === "ready" && (
+            <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
+          )}
 
-          <div className="cpt-stage-center">
-            {cameraStatus === "ready" && (
-              <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
+          <div className="cpt-crosshair" />
+
+          {/* Clinical Geometric Stimulus: Circle (Go) / Square (No-Go) as in QbTest/TOVA */}
+          <div className="clinical-stimulus">
+            {stimulusVisible && trial && (
+              <div
+                className={`stimulus-shape ${trial.kind === "no-go" ? "shape-stop" : ""}`}
+              />
             )}
-
-            <div
-              className={`stimulus-beacon ${
-                stimulusVisible && trial?.kind === "go"
-                  ? "beacon-go"
-                  : stimulusVisible && trial?.kind === "no-go"
-                  ? "beacon-stop"
-                  : "beacon-idle"
-              }`}
-            >
-              <span>{stimulusVisible ? (trial?.kind === "go" ? "GO" : "NO-GO") : trial ? "+" : "READY"}</span>
-            </div>
-
-            <div className="cpt-feedback-text">{feedback}</div>
           </div>
 
-          <div className="trigger-zone-wrap">
-            <button className="touch-trigger-btn" onClick={respond} aria-label="Tekan respon target hijau">
-              <span>TEKAN DI SINI (SPACE / TAP)</span>
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              style={{ height: "64px", borderRadius: "16px" }}
-              onClick={endSession}
-            >
-              Akhiri Sesi Lebih Awal
-            </button>
+          <div className="cpt-subtle-hint">
+            TEKAN [SPACEBAR] SAAT LINGKARAN HIJAU MUNCUL · TAHAN PADA KOTAK MERAH
           </div>
         </section>
       )}
 
-      {/* PHASE 4: Dual-Tone Results Dashboard */}
+      {/* PHASE 4: Dual-Tone Results Dashboard & Clinical A4 Referral */}
       {phase === "results" && (
         <section className="screening-content">
           <div className="results-header">
             <div className="status-pill">
-              <span className="status-dot" /> {isDemo ? `Simulasi Benchmark · ${demoProfile.toUpperCase()}` : `Sesi Selesai · ${formatSessionDate(sessionStartedAt)}`}
+              <span className="status-dot" />{" "}
+              {isDemo
+                ? `Simulasi Benchmark 6 Blok · ${demoProfile.toUpperCase()}`
+                : `Sesi Selesai (${actualDurationSec}s) · ${formatSessionDate(sessionStartedAt)}`}
             </div>
             <h1 style={{ color: "var(--text-primary)" }}>
               Hasil Pengamatan <em>Ritme Fokusmu.</em>
             </h1>
-            <p className="hero-lede">
-              Berikut data objektif kecepatan respons dan daya tahan perhatianmu selama tugas berlangsung. (ID: {sessionId || "OC-LOCAL"})
+            <p className="hero-lede" style={{ marginBottom: "14px" }}>
+              ID Sesi: <strong>{sessionId || "OC-LOCAL"}</strong> ·{" "}
+              {isDemo ? "Data benchmark sintetis" : formatSubjectContextLabel(subjectContext)}
             </p>
           </div>
 
@@ -797,7 +1004,7 @@ export default function ScreeningPage() {
               className={`tab-btn ${analysisMode === "layperson" ? "active" : ""}`}
               onClick={() => setAnalysisMode("layperson")}
             >
-              Penjelasan Untuk Saya (Awam & Praktis)
+              Penjelasan Untuk Saya (Awam &amp; Praktis)
             </button>
             <button
               type="button"
@@ -810,47 +1017,48 @@ export default function ScreeningPage() {
 
           {/* 3 CORE PILLARS CARD GRID */}
           <div className="results-grid-cards">
-            {/* CARD 1: Stamina & Konsistensi */}
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Stamina Fokus & Kecepatan" : "Psychomotor Speed (Median RT)"}
+                  {analysisMode === "layperson" ? "Stamina Fokus & Kecepatan" : "Psychomotor Speed & RTV"}
                 </div>
                 <div className="result-card-value">{metrics.medianReactionTimeMs ?? 0} ms</div>
                 <div className="result-card-desc">
                   {analysisMode === "layperson"
-                    ? "Waktu rata-rata otakmu memproses dan menggerakkan jari saat target hijau muncul."
-                    : `Median latency reaksi foveal. RTV: ${metrics.reactionTimeVariabilityMs ?? 0} ms.`}
+                    ? "Waktu rata-rata otakmu merespons target hijau yang muncul sekejap."
+                    : `Median RT: ${metrics.medianReactionTimeMs ?? 0} ms · RTV (Variabilitas): ${metrics.reactionTimeVariabilityMs ?? 0} ms · Fatigue Slope: ${clinicalStats.fatigueSlope ?? 0}/blok.`}
                 </div>
               </div>
-              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--deep)" }}>
-                Ketepatan Go: {percent(metrics.hitRate)}
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--accent-teal)" }}>
+                Ketepatan Go: {percent(metrics.hitRate)} · Lapse (&gt;750ms): {clinicalStats.attentionLapses}
               </div>
             </div>
 
-            {/* CARD 2: Gaya Gangguan */}
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Pola Refleks Terburu-buru" : "Inhibitory Control (Commission)"}
+                  {analysisMode === "layperson" ? "Kontrol Rem & Kelengahan" : "Inhibition & Signal Detection (d')"}
                 </div>
-                <div className="result-card-value">{metrics.commissions} Kali</div>
+                <div className="result-card-value">
+                  {analysisMode === "layperson"
+                    ? `${metrics.commissions} Salah`
+                    : `d' = ${clinicalStats.dPrime ?? "N/A"}`}
+                </div>
                 <div className="result-card-desc">
                   {analysisMode === "layperson"
-                    ? "Frekuensi jarimu keliru menekan target merah yang seharusnya ditahan."
-                    : `Commission Error Rate: ${percent(metrics.commissionRate)}. Indikator impulsivitas motorik.`}
+                    ? "Berapa kali jari terburu-buru menekan target merah yang harusnya ditahan."
+                    : `Commission Rate: ${percent(metrics.commissionRate)} (${metrics.commissions}x) · Omission Rate: ${percent(metrics.omissionRate)} (${metrics.omissions}x).`}
                 </div>
               </div>
-              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--coral)" }}>
-                Target Terlewat: {metrics.omissions} (Melamun)
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--coral-danger)" }}>
+                Terlewat (Omission): {metrics.omissions} · Antisipasi (&lt;120ms): {clinicalStats.anticipatoryResponses}
               </div>
             </div>
 
-            {/* CARD 3: Triangulasi Kronis ASRS */}
             <div className="result-card">
               <div>
                 <div className="result-card-title">
-                  {analysisMode === "layperson" ? "Keluhan Harian (WHO ASRS)" : "Chronic Symptom Index"}
+                  {analysisMode === "layperson" ? "Keluhan Harian (WHO ASRS)" : "Chronic Trait & Context"}
                 </div>
                 <div className="result-card-value">
                   {asrsResult ? `${asrsResult.significantCount}/6` : "-"}
@@ -863,42 +1071,45 @@ export default function ScreeningPage() {
                     : asrsResult?.interpretationClinical}
                 </div>
               </div>
-              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)" }}>
-                Total Skor: {asrsResult?.totalScore ?? 0}/24
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                Skor ASRS: {asrsResult?.totalScore ?? 0}/24 · Interupsi Tab: {tabDistractionCount}x
               </div>
             </div>
           </div>
 
           {/* DUAL INSIGHT / CLINICAL REFERRAL PANEL */}
           <div className="analysis-panel">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <strong style={{ fontSize: "0.95rem" }}>
-                {analysisMode === "layperson" ? "💡 Kesimpulan & Saran Sehari-hari" : "📋 Catatan Klinis Rujukan Profesional"}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "12px", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: "0.95rem", color: "var(--text-primary)" }}>
+                {analysisMode === "layperson" ? "Kesimpulan & Kebiasaan Harian" : "Ringkasan Rujukan Klinis Profesional"}
               </strong>
               <button
                 type="button"
                 className="secondary-button btn-no-print"
                 style={{ padding: "6px 14px", fontSize: "0.75rem" }}
-                onClick={requestAnalysis}
+                onClick={() => void requestAnalysisWith(trials, asrsResult, isDemo, actualDurationSec, tabDistractionCount)}
                 disabled={analysisLoading}
               >
-                {analysisLoading ? "Menganalisis…" : "Sinkronisasi AI Gemini"}
+                {analysisLoading ? "Menganalisis…" : "Perbarui Analisis AI"}
               </button>
             </div>
 
             {analysis ? (
               analysisMode === "layperson" ? (
                 <div>
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--deep)" }}>
-                    {analysis.layperson_insight.reaction_style_headline}
+                  <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--accent-teal)" }}>
+                    {analysis.layperson_insight.stamina_headline} · {analysis.layperson_insight.reaction_style_headline}
                   </h3>
-                  <p style={{ fontSize: "0.85rem", color: "var(--muted)", margin: "0 0 14px", lineHeight: 1.55 }}>
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", margin: "0 0 8px", lineHeight: 1.55 }}>
+                    {analysis.layperson_insight.stamina_description}
+                  </p>
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.55 }}>
                     {analysis.layperson_insight.reaction_style_description}
                   </p>
-                  <strong style={{ fontSize: "0.82rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Langkah yang Bisa Kamu Coba:
+                  <strong style={{ fontSize: "0.82rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-primary)" }}>
+                    Langkah Praktis yang Bisa Dicoba:
                   </strong>
-                  <ul style={{ margin: "8px 0 0", paddingLeft: "20px", fontSize: "0.82rem", color: "var(--muted)", lineHeight: 1.6 }}>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: "20px", fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
                     {analysis.layperson_insight.actionable_habits.map((h, i) => (
                       <li key={i}>{h}</li>
                     ))}
@@ -906,67 +1117,95 @@ export default function ScreeningPage() {
                 </div>
               ) : (
                 <div>
-                  <div style={{ background: "var(--surface-alt)", padding: "12px", borderRadius: "10px", marginBottom: "12px" }}>
-                    <strong>Kesan Triase: </strong>
-                    <span style={{ fontSize: "0.84rem", color: "var(--muted)" }}>
+                  <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "10px", marginBottom: "12px", border: "1px solid var(--surface-border)" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Batasan Triase: </strong>
+                    <span style={{ fontSize: "0.84rem", color: "var(--text-secondary)" }}>
                       {analysis.clinical_referral.diagnostic_impression}
                     </span>
                   </div>
-                  <p style={{ fontSize: "0.82rem", color: "var(--muted)", lineHeight: 1.5, margin: "0 0 8px" }}>
-                    <strong>Psikometri CPT: </strong>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Korelasi ASRS &amp; Konteks: </strong>
+                    {analysis.clinical_referral.asrs_clinical_correlation}
+                  </p>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Psikometri CPT: </strong>
                     {analysis.clinical_referral.cpt_psychometric_note}
                   </p>
-                  <p style={{ fontSize: "0.82rem", color: "var(--muted)", lineHeight: 1.5, margin: "0 0 12px" }}>
-                    <strong>Stabilitas Okulomotor: </strong>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 12px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Stabilitas Okulomotor: </strong>
                     {analysis.clinical_referral.gaze_stability_note}
                   </p>
-                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase" }}>Rekomendasi Lanjutan:</strong>
-                  <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--muted)" }}>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Rekomendasi Tindak Lanjut:</strong>
+                  <ul style={{ margin: "6px 0 10px", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
                     {analysis.clinical_referral.provisional_recommendations.map((r, i) => (
                       <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Keterbatasan Metodologis:</strong>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    {analysis.clinical_referral.formal_limitations.map((l, i) => (
+                      <li key={i}>{l}</li>
                     ))}
                   </ul>
                 </div>
               )
             ) : (
-              <div style={{ padding: "12px 0", color: "var(--muted)", fontSize: "0.82rem" }}>
-                {analysisError
-                  ? "Sintesis AI eksternal sedang mengalami kendala jaringan. Analisis lokal tetap tersaji di atas."
-                  : "Klik tombol di atas untuk menyusun sintesis cerdas berdasarkan kombinasi kuesioner ASRS dan data CPT."}
+              <div style={{ padding: "12px 0", color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                {analysisLoading
+                  ? "Menyusun analisis triangulasi (ASRS + CPT 6-Blok + Konteks)…"
+                  : analysisError
+                  ? "Analisis AI eksternal gagal dimuat. Klik Perbarui Analisis AI untuk mencoba ulang."
+                  : "Menyiapkan ringkasan hasil…"}
               </div>
             )}
           </div>
 
-          {/* Attention Fatigue Curve */}
+          {/* Multi-Block Attention Fatigue Curve */}
           <div className="attention-curve">
             <div className="curve-heading">
-              <strong>Grafik Stamina Fokus (Menit ke Menit)</strong>
-              <span>Keberhasilan Go per 10 Detik</span>
+              <strong>Kurva Stamina &amp; Kecepatan per Blok ({attentionBlocks.length} Blok)</strong>
+              <span>
+                Fatigue Slope: {clinicalStats.fatigueSlope ?? 0}/blok · RT Slope: {clinicalStats.rtSlopeMsPerBlock ?? 0} ms/blok
+              </span>
             </div>
             <div className="curve-bars">
               {attentionBlocks.map((b) => (
                 <div className="curve-column" key={b.index}>
+                  <div style={{ fontSize: "0.62rem", color: "var(--text-secondary)" }}>
+                    {b.medianRtMs ? `${b.medianRtMs}ms` : "-"}
+                  </div>
                   <div className="curve-track">
                     <div
                       className="curve-fill"
                       style={{ height: `${Math.max(8, Math.round(b.hitRate * 100))}%` }}
                     />
                   </div>
-                  <span>B{b.index + 1}</span>
+                  <span>
+                    B{b.index + 1} ({Math.round(b.hitRate * 100)}%)
+                  </span>
+                  {b.blockPhase && (
+                    <span style={{ fontSize: "0.58rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
+                      {b.blockPhase}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
             <div className="curve-legend" style={{ marginTop: "10px" }}>
-              <span>Kurva menurun mengindikasikan penurunan daya tahan fokus di paruh kedua tugas.</span>
+              <span>Penurunan bar di Blok 3–6 mencerminkan kelelahan atensi saat tugas monoton/tekanan tinggi.</span>
             </div>
           </div>
 
-          {/* Gaze Plot (Shown for both real usable gaze and synthetic demo) */}
-          {((!isDemo && gaze.quality.status === "usable") || isDemo) && (
+          {/* Gaze Plot */}
+          {((!isDemo && gaze.quality.status !== "unavailable") || isDemo) && (
             <div className="gaze-panel">
               <div className="curve-heading">
-                <strong>Kestabilan Tatapan Mata {isDemo ? "(Simulasi Sintetis)" : ""}</strong>
-                <span>{isDemo ? "Demo 48 Titik Fiksasi" : "48 Sampel Terakhir"}</span>
+                <strong>Kestabilan Fiksasi Mata {isDemo ? "(Simulasi Sintetis)" : `(Status: ${gaze.quality.status.toUpperCase()})`}</strong>
+                <span>
+                  {isDemo
+                    ? "64 Titik Benchmark"
+                    : `Coverage: ${percent(gaze.quality.coverage)} · Out-of-Bounds: ${percent(gaze.outOfBoundsRate)}`}
+                </span>
               </div>
               <div className="gaze-plot">
                 {(isDemo ? (demoProfile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE) : gaze.trace)
@@ -981,10 +1220,10 @@ export default function ScreeningPage() {
                     />
                   ))}
               </div>
-              <p style={{ fontSize: "0.74rem", color: "var(--muted)", margin: "8px 0 0" }}>
+              <p style={{ fontSize: "0.74rem", color: "var(--text-muted)", margin: "8px 0 0" }}>
                 {isDemo
-                  ? "Peta sebaran tatapan mata sintetis untuk keperluan peragaan panggung tanpa kamera aktif."
-                  : "Makin rapat titik di tengah salib, makin tenang fiksasi matamu saat stimulus muncul."}
+                  ? "Peta dispersi tatapan sintetis untuk demonstrasi perbandingan profil stabil vs mudah teralihkan."
+                  : "Semakin terpusat titik di persimpangan salib (+), semakin stabil fiksasi pandanganmu pada area target."}
               </p>
             </div>
           )}
@@ -992,10 +1231,10 @@ export default function ScreeningPage() {
           {/* Footer Actions & Export */}
           <div className="hero-actions btn-no-print" style={{ marginTop: "28px" }}>
             <button className="primary-button" onClick={printSummary}>
-              Cetak / Simpan Lembar Rujukan (PDF 1 Halaman) <span aria-hidden="true">→</span>
+              Cetak / Simpan Lembar Rujukan (PDF A4) <span aria-hidden="true">→</span>
             </button>
             <button className="secondary-button" onClick={downloadJson}>
-              Unduh Data Telemetri (.JSON)
+              Unduh Data Telemetri v2.1 (.JSON)
             </button>
             {user && (
               <Link className="secondary-button" href="/dashboard">
@@ -1006,7 +1245,10 @@ export default function ScreeningPage() {
               className="secondary-button"
               onClick={() => {
                 setIsDemo(false);
-                setPhase("questionnaire");
+                setAsrsStep(0);
+                setAsrsAnswers({});
+                setPracticeState("idle");
+                setPhase("ready");
               }}
             >
               Ulangi Tes ↻

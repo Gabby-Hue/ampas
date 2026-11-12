@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   calculateAttentionBlocks,
+  calculateClinicalStats,
   calculateCptMetrics,
   classifyResponse,
   createCptTrials,
+  createStructuredCptTrials,
 } from "./engine.ts";
 
 test("Go/No-Go mengklasifikasikan respons dan diam dengan benar", () => {
@@ -50,4 +52,28 @@ test("tanpa hit, reaction time dinyatakan tidak tersedia", () => {
   ]);
   assert.equal(result.medianReactionTimeMs, null);
   assert.equal(result.reactionTimeVariabilityMs, null);
+});
+
+test("createStructuredCptTrials menghasilkan 6 blok untuk mode klinis dan 3 blok untuk mode cepat", () => {
+  const clinical = createStructuredCptTrials("clinical", 20261111);
+  const quick = createStructuredCptTrials("quick", 20261111);
+  assert.equal(new Set(clinical.map((t) => t.blockIndex)).size, 6);
+  assert.equal(new Set(quick.map((t) => t.blockIndex)).size, 3);
+  assert.equal(clinical[0].blockPhase, "baseline");
+  assert.equal(clinical[clinical.length - 1].blockPhase, "recovery");
+});
+
+test("calculateClinicalStats menghitung dPrime, lapses, dan fatigueSlope", () => {
+  const events = [
+    { index: 0, blockIndex: 0, blockPhase: "baseline", kind: "go", delayMs: 1000, shownAt: 100, respondedAt: 400, response: "hit" },
+    { index: 1, blockIndex: 0, blockPhase: "baseline", kind: "no-go", delayMs: 1000, shownAt: 1100, response: "correct-rejection" },
+    { index: 2, blockIndex: 1, blockPhase: "boredom", kind: "go", delayMs: 1200, shownAt: 2100, respondedAt: 2950, response: "hit" },
+    { index: 3, blockIndex: 1, blockPhase: "boredom", kind: "go", delayMs: 1200, shownAt: 3300, response: "omission" },
+    { index: 4, blockIndex: 1, blockPhase: "boredom", kind: "no-go", delayMs: 1200, shownAt: 4500, respondedAt: 4600, response: "commission" },
+  ];
+  const stats = calculateClinicalStats(events);
+  assert.ok(typeof stats.dPrime === "number");
+  assert.equal(stats.attentionLapses, 1);
+  assert.equal(stats.anticipatoryResponses, 1);
+  assert.equal(stats.fatigueSlope, -0.5);
 });

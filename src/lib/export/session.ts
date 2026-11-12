@@ -1,12 +1,16 @@
-import type { CptMetrics } from "../cpt/engine";
+import type { ClinicalStats, CptMetrics } from "../cpt/engine";
 import type { GazeQuality } from "../gaze/quality";
 import type { AsrsResult } from "../cpt/asrs";
+import type { SubjectContext } from "../cpt/context";
 
 export type SessionExport = {
   session_id: string;
-  test_version: "2.0";
+  test_version: "2.1";
+  test_mode: "clinical" | "quick" | "synthetic";
   synthetic_demo: boolean;
   duration_seconds: number;
+  tab_interruptions?: number;
+  subject_context?: SubjectContext;
   asrs?: {
     total_score: number;
     significant_items: number;
@@ -25,8 +29,19 @@ export type SessionExport = {
     commission_rate: number;
     median_rt_ms: number | null;
     rt_variability_ms: number | null;
+    d_prime?: number | null;
+    anticipatory_responses?: number;
+    attention_lapses?: number;
+    fatigue_slope?: number | null;
+    rt_slope_ms_per_block?: number | null;
   };
-  gaze: { status: GazeQuality["status"] | "unavailable"; reason: string; data_coverage: number; relative_dispersion: number };
+  gaze: {
+    status: GazeQuality["status"] | "unavailable";
+    reason: string;
+    data_coverage: number;
+    relative_dispersion: number;
+    out_of_bounds_rate?: number;
+  };
 };
 
 export function buildSessionExport(
@@ -34,20 +49,62 @@ export function buildSessionExport(
   isDemo: boolean,
   metrics: CptMetrics,
   gaze: GazeQuality,
-  asrs?: AsrsResult | null
+  asrs?: AsrsResult | null,
+  extras?: {
+    clinicalStats?: ClinicalStats;
+    subjectContext?: SubjectContext;
+    durationSeconds?: number;
+    tabInterruptions?: number;
+    outOfBoundsRate?: number;
+  }
 ): SessionExport {
+  const testMode = isDemo ? "synthetic" : (extras?.subjectContext?.testMode ?? "clinical");
+  const durationSeconds = isDemo ? 0 : (extras?.durationSeconds ?? 360);
+
   return {
     session_id: sessionId || "OC-LOCAL",
-    test_version: "2.0",
+    test_version: "2.1",
+    test_mode: testMode,
     synthetic_demo: isDemo,
-    duration_seconds: isDemo ? 0 : 60,
-    asrs: asrs ? {
-      total_score: asrs.totalScore,
-      significant_items: asrs.significantCount,
-      is_significant: asrs.isSignificant,
-      clinical_summary: asrs.interpretationClinical,
-    } : undefined,
-    cpt: { go_trials: metrics.goTrials, no_go_trials: metrics.noGoTrials, hits: metrics.hits, omissions: metrics.omissions, commissions: metrics.commissions, correct_rejections: metrics.correctRejections, hit_rate: metrics.hitRate, omission_rate: metrics.omissionRate, commission_rate: metrics.commissionRate, median_rt_ms: metrics.medianReactionTimeMs, rt_variability_ms: metrics.reactionTimeVariabilityMs },
-    gaze: { status: isDemo ? "unavailable" : gaze.status, reason: isDemo ? "synthetic-demo" : gaze.reason, data_coverage: isDemo ? 0 : gaze.coverage, relative_dispersion: isDemo ? 0 : gaze.relativeDispersion },
+    duration_seconds: durationSeconds,
+    tab_interruptions: isDemo ? 0 : (extras?.tabInterruptions ?? 0),
+    subject_context: isDemo ? undefined : extras?.subjectContext,
+    asrs: asrs
+      ? {
+          total_score: asrs.totalScore,
+          significant_items: asrs.significantCount,
+          is_significant: asrs.isSignificant,
+          clinical_summary: asrs.interpretationClinical,
+        }
+      : undefined,
+    cpt: {
+      go_trials: metrics.goTrials,
+      no_go_trials: metrics.noGoTrials,
+      hits: metrics.hits,
+      omissions: metrics.omissions,
+      commissions: metrics.commissions,
+      correct_rejections: metrics.correctRejections,
+      hit_rate: metrics.hitRate,
+      omission_rate: metrics.omissionRate,
+      commission_rate: metrics.commissionRate,
+      median_rt_ms: metrics.medianReactionTimeMs,
+      rt_variability_ms: metrics.reactionTimeVariabilityMs,
+      ...(extras?.clinicalStats
+        ? {
+            d_prime: extras.clinicalStats.dPrime,
+            anticipatory_responses: extras.clinicalStats.anticipatoryResponses,
+            attention_lapses: extras.clinicalStats.attentionLapses,
+            fatigue_slope: extras.clinicalStats.fatigueSlope,
+            rt_slope_ms_per_block: extras.clinicalStats.rtSlopeMsPerBlock,
+          }
+        : {}),
+    },
+    gaze: {
+      status: isDemo ? "unavailable" : gaze.status,
+      reason: isDemo ? "synthetic-demo" : gaze.reason,
+      data_coverage: isDemo ? 0 : gaze.coverage,
+      relative_dispersion: isDemo ? 0 : gaze.relativeDispersion,
+      ...(isDemo || extras?.outOfBoundsRate === undefined ? {} : { out_of_bounds_rate: extras.outOfBoundsRate }),
+    },
   };
 }

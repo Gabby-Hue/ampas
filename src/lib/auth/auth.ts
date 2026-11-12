@@ -86,11 +86,17 @@ export function saveUsersToStorage(users: UserRecord[]): void {
   }
 }
 
+let cachedRawUser: string | null | undefined = undefined;
+let cachedParsedUser: SafeUser | null = null;
+
 export function getActiveUser(): SafeUser | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(SESSION_USER_KEY);
-    return raw ? (JSON.parse(raw) as SafeUser) : null;
+    if (raw === cachedRawUser) return cachedParsedUser;
+    cachedRawUser = raw;
+    cachedParsedUser = raw ? (JSON.parse(raw) as SafeUser) : null;
+    return cachedParsedUser;
   } catch {
     return null;
   }
@@ -109,9 +115,14 @@ export function setActiveUser(user: SafeUser | null): void {
   if (typeof window === "undefined") return;
   try {
     if (user) {
-      localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+      const raw = JSON.stringify(user);
+      localStorage.setItem(SESSION_USER_KEY, raw);
+      cachedRawUser = raw;
+      cachedParsedUser = user;
     } else {
       localStorage.removeItem(SESSION_USER_KEY);
+      cachedRawUser = null;
+      cachedParsedUser = null;
     }
   } catch {
     // ignore
