@@ -112,7 +112,6 @@ export default function ScreeningPage() {
   const [testMode] = useState<TestMode>("clinical");
 
   // Tier 2 Pre-flight Integrity & Environmental Protocol
-  const [consent] = useState(false);
   const [skipCamera, setSkipCamera] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [isTestPaused, setIsTestPaused] = useState(false);
@@ -123,13 +122,7 @@ export default function ScreeningPage() {
 
   // Guided Timed Practice (6 real 250ms flash trials)
   const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [practiceStimulusVisible, setPracticeStimulusVisible] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceScore, setPracticeScore] = useState(0);
   const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
   const practiceCorrectRef = useRef(0);
@@ -168,6 +161,7 @@ export default function ScreeningPage() {
   const targetDurationMs = useRef(CLINICAL_DURATION_MS);
   const showTrialRef = useRef<() => void>(() => undefined);
   const endSessionRef = useRef<() => void>(() => undefined);
+  const startTestRef = useRef<() => void>(() => undefined);
   const trialTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -485,8 +479,7 @@ export default function ScreeningPage() {
     showTrialRef.current = showTrial;
   }, [showTrial]);
 
-  const startTest = () => {
-    if (!consent) return;
+  const startTest = useCallback(() => {
     clearTimers();
     gaze.reset();
     const duration = subjectContext.testMode === "clinical" ? CLINICAL_DURATION_MS : QUICK_DURATION_MS;
@@ -517,15 +510,17 @@ export default function ScreeningPage() {
     clockTimer.current = setInterval(() => {
       // internal clock tracking
     }, 1000);
-  };
+  }, [clearTimers, gaze, subjectContext]);
+
+  useEffect(() => {
+    startTestRef.current = startTest;
+  }, [startTest]);
 
   // Guided Timed Flash Practice Engine
   const runPracticeStep = (idx: number) => {
     if (idx >= PRACTICE_SEQUENCE.length) {
       const score = practiceCorrectRef.current;
       setPracticeScore(score);
-      setPracticeKind(null);
-      setPracticeStimulusVisible(false);
       if (score >= 4) {
         setPracticeState("passed");
         setPracticeFeedback(`Latihan lulus (${score}/${PRACTICE_SEQUENCE.length} benar). Kalibrasi motorik siap.`);
@@ -537,14 +532,10 @@ export default function ScreeningPage() {
     }
 
     const step = PRACTICE_SEQUENCE[idx];
-    setPracticeKind(step.kind);
-    setPracticeStimulusVisible(true);
     practiceActiveRef.current = { kind: step.kind, shownAt: performance.now(), responded: false };
     setPracticeFeedback(step.kind === "go" ? "HIJAU: Tekan SPACE / Tombol sekarang!" : "MERAH: Tahan, jangan tekan!");
 
-    practiceFlashRef.current = setTimeout(() => {
-      setPracticeStimulusVisible(false);
-    }, 250);
+    practiceFlashRef.current = setTimeout(() => {}, 250);
 
     practiceTimerRef.current = setTimeout(() => {
       const active = practiceActiveRef.current;
@@ -563,6 +554,17 @@ export default function ScreeningPage() {
   useEffect(() => {
     runPracticeStepRef.current = runPracticeStep;
   });
+
+  const startGuidedPractice = () => {
+    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
+    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
+    practiceCorrectRef.current = 0;
+    practiceActiveRef.current = null;
+    setPracticeScore(0);
+    setPracticeState("running");
+    setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
+    practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
+  };
 
   const handlePracticeRespond = useCallback(() => {
     if (practiceState !== "running") return;
@@ -667,6 +669,13 @@ export default function ScreeningPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [respond, phase, practiceState]);
 
+  // Auto-transition to CPT once practice is passed
+  useEffect(() => {
+    if (phase === "ready" && practiceState === "passed") {
+      startTestRef.current();
+    }
+  }, [phase, practiceState]);
+
   useEffect(() => () => {
     clearTimers();
     stopCamera();
@@ -713,7 +722,7 @@ export default function ScreeningPage() {
     const scored = scoreAsrs(asrsAnswers);
     setAsrsResult(scored);
     setIsDemo(false);
-    startTest();
+    startTestRef.current();
   };
 
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
@@ -864,6 +873,58 @@ export default function ScreeningPage() {
             >
               Muat data demo
             </button>
+
+            {/* Practice section */}
+            <div style={{ marginTop: "24px", borderTop: "1px solid var(--surface-border)", paddingTop: "20px" }}>
+              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 12px", lineHeight: 1.6 }}>
+                Latihan singkat — tekan SPASI saat lingkaran hijau muncul, tahan saat merah.
+              </p>
+              {practiceState === "running" && (
+                <div style={{ marginBottom: "14px" }}>
+                  <p style={{ fontSize: "0.92rem", fontWeight: 600, color: "var(--accent)", margin: "0 0 4px" }}>
+                    {practiceFeedback}
+                  </p>
+                  <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: 0 }}>
+                    Skor: {practiceScore} / {PRACTICE_SEQUENCE.length}
+                  </p>
+                </div>
+              )}
+              {practiceState === "passed" && (
+                <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 14px", fontWeight: 600 }}>
+                  ✓ {practiceFeedback}
+                </p>
+              )}
+              {practiceState === "retry" && (
+                <p style={{ fontSize: "0.88rem", color: "var(--warning)", margin: "0 0 14px" }}>
+                  {practiceFeedback}
+                </p>
+              )}
+              <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                {(practiceState === "idle" || practiceState === "retry") && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={startGuidedPractice}
+                  >
+                    Mulai Latihan
+                  </button>
+                )}
+                {practiceState === "running" && (
+                  <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                    Menunggu respons…
+                  </span>
+                )}
+                {(practiceState === "idle" || practiceState === "passed" || practiceState === "retry") && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => { setPracticeState("passed"); startTest(); }}
+                  >
+                    Lewati Latihan → Mulai Tes
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </section>
       )}
