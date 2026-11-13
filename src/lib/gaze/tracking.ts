@@ -10,6 +10,7 @@ const WASM_URL = "/mediapipe/wasm";
 export function useGazeTracking(videoRef: RefObject<HTMLVideoElement | null>, enabled: boolean) {
   const [quality, setQuality] = useState<GazeQuality>({ status: "unavailable", reason: "no-samples", coverage: 0, relativeDispersion: 0, validSamples: 0 });
   const [trace, setTrace] = useState<GazeSample[]>([]);
+  const [latestSample, setLatestSample] = useState<GazeSample | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "tracking" | "unavailable">("idle");
   const samplesRef = useRef<GazeSample[]>([]);
 
@@ -49,12 +50,17 @@ export function useGazeTracking(videoRef: RefObject<HTMLVideoElement | null>, en
             try {
               const result = landmarker?.detectForVideo(video, timestamp);
               const landmarks = result?.faceLandmarks?.[0] ?? [];
-              samplesRef.current.push(estimateRelativeIrisPosition(landmarks));
+              const s = estimateRelativeIrisPosition(landmarks);
+              samplesRef.current.push(s);
+              setLatestSample(s);
               if (samplesRef.current.length > 180) samplesRef.current.shift();
               setQuality(calculateGazeQuality(samplesRef.current));
               setTrace(samplesRef.current.slice(-48));
             } catch {
-              samplesRef.current.push({ x: 0, y: 0, valid: false });
+              const s = { x: 0, y: 0, valid: false };
+              samplesRef.current.push(s);
+              setLatestSample(s);
+              if (samplesRef.current.length > 180) samplesRef.current.shift();
               setQuality(calculateGazeQuality(samplesRef.current));
               setTrace(samplesRef.current.slice(-48));
             }
@@ -81,7 +87,8 @@ export function useGazeTracking(videoRef: RefObject<HTMLVideoElement | null>, en
     samplesRef.current = [];
     setQuality({ status: "unavailable", reason: "no-samples", coverage: 0, relativeDispersion: 0, validSamples: 0 });
     setTrace([]);
+    setLatestSample(null);
   };
 
-  return { quality, status, trace, reset };
+  return { quality, status, trace, reset, latestSample };
 }

@@ -17,8 +17,16 @@ import {
 import { ASRS_QUESTIONS, ASRS_OPTIONS, scoreAsrs, type AsrsResult } from "@/lib/cpt/asrs";
 import { useGazeTracking } from "@/lib/gaze/tracking";
 import { buildSessionExport } from "@/lib/export/session";
+import {
+  calculateTrailingMetrics,
+  generateDemoTrailingSamples,
+  type TrailingSample,
+  type TrailingMetrics,
+} from "@/lib/gaze/trailing";
+import { TrailingVisualization } from "@/components/TrailingVisualization";
+import { RadarGazeHeatmap } from "@/components/RadarGazeHeatmap";
 
-type Phase = "questionnaire" | "ready" | "running" | "results";
+type Phase = "questionnaire" | "ready" | "running" | "trailing" | "results";
 type Trial = CptEvent;
 
 const TEST_DURATION = 60_000;
@@ -127,6 +135,14 @@ export default function ScreeningPage() {
   const trialsRef = useRef<Trial[]>([]);
   const activeTrialRef = useRef<Trial | null>(null);
 
+  const [durationMode, setDurationMode] = useState<"quick" | "clinical">("quick");
+  const [trailingSamples, setTrailingSamples] = useState<TrailingSample[]>([]);
+  const [trailingMetrics, setTrailingMetrics] = useState<TrailingMetrics | null>(null);
+  const [trailingSecondsLeft, setTrailingSecondsLeft] = useState(10);
+  const [trailingBallPos, setTrailingBallPos] = useState({ x: 0.5, y: 0.5 });
+  const trailingSamplesRef = useRef<TrailingSample[]>([]);
+  const trailingStartedAt = useRef(0);
+
   useEffect(() => {
     setUser(getActiveUser());
   }, []);
@@ -213,7 +229,8 @@ export default function ScreeningPage() {
 
   const showTrial = useCallback(() => {
     if (isTestPaused) return;
-    if (Date.now() - startedAt.current >= TEST_DURATION) return;
+    const activeDuration = durationMode === "clinical" ? 300_000 : 60_000;
+    if (Date.now() - startedAt.current >= activeDuration) return;
     const planned = plannedTrials.current[trialIndex.current % plannedTrials.current.length];
     trialIndex.current += 1;
     const next: Trial = { ...planned, shownAt: performance.now() };
@@ -228,13 +245,15 @@ export default function ScreeningPage() {
     setStimulusVisible(true);
 
     if (flashTimer.current) clearTimeout(flashTimer.current);
+    // Berikan durasi tampilan 500ms (0.5 detik) agar persepsi visual adil & tidak terburu-buru
+    const displayDuration = next.kind === "no-go" ? 550 : 480;
     flashTimer.current = setTimeout(() => {
       setStimulusVisible(false);
-    }, 250);
+    }, displayDuration);
 
-    setFeedback(next.kind === "go" ? "GO · tekan sekarang" : "NO-GO · tahan respons");
+    setFeedback(next.kind === "go" ? "HIJAU · Tekan sekarang!" : "MERAH · JANGAN PENCET! (Lepas jari)");
     trialTimer.current = setTimeout(() => showTrialRef.current(), next.delayMs);
-  }, [isTestPaused]);
+  }, [isTestPaused, durationMode]);
 
   useEffect(() => {
     showTrialRef.current = showTrial;
@@ -248,19 +267,35 @@ export default function ScreeningPage() {
     else if (practiceStep === "no-go") setPracticeStep("done");
   };
 
-  const endSession = useCallback(() => {
+  const startTrailingStage = useCallback(() => {
+    clearTimers();
     const active = activeTrialRef.current;
     if (active && !active.response) {
       trialsRef.current = [...trialsRef.current, { ...active, response: classifyResponse(active.kind, false) }];
     }
+    setTrials(trialsRef.current);
+    setTrial(null);
+    setStimulusVisible(false);
+    setPhase("trailing");
+    setTrailingSecondsLeft(10);
+    trailingSamplesRef.current = [];
+    trailingStartedAt.current = performance.now();
+  }, [clearTimers]);
+
+  const completeAllTesting = useCallback(() => {
+    clearTimers();
+    stopCamera();
+    const finalSamples = trailingSamplesRef.current;
+    setTrailingSamples(finalSamples);
+    const computedTrailingMetrics = calculateTrailingMetrics(finalSamples);
+    setTrailingMetrics(computedTrailingMetrics);
+
     const finalTrials = trialsRef.current;
     const finalMetrics = calculateCptMetrics(finalTrials);
     setTrials(finalTrials);
     setTrial(null);
     setStimulusVisible(false);
     setPhase("results");
-    stopCamera();
-    clearTimers();
 
     // Auto-persist to history if user is logged in
     const activeUsr = getActiveUser();
@@ -269,7 +304,7 @@ export default function ScreeningPage() {
         sessionId: sessionId || "OC-LOCAL",
         userId: activeUsr.id,
         date: Date.now(),
-        durationSeconds: 60,
+        durationSeconds: (durationMode === "clinical" ? 300 : 60) + 10,
         asrsTotalScore: asrsResult?.totalScore ?? 0,
         asrsSignificant: asrsResult?.isSignificant ?? false,
         medianRtMs: finalMetrics.medianReactionTimeMs,
@@ -279,7 +314,9 @@ export default function ScreeningPage() {
         gazeStatus: gaze.quality.status,
       });
     }
-  }, [clearTimers, stopCamera, isDemo, sessionId, asrsResult, gaze.quality.status]);
+  }, [clearTimers, stopCamera, isDemo, sessionId, asrsResult, gaze.quality.status, durationMode]);
+
+  const endSession = startTrailingStage;
 
   const startTest = () => {
     if (!consent) return;
@@ -296,13 +333,21 @@ export default function ScreeningPage() {
     setTrials([]);
     setTrial(null);
     setStimulusVisible(false);
-    setSecondsLeft(60);
+
+    const testDurationMs = durationMode === "clinical" ? 300_000 : 60_000;
+    const initialSeconds = durationMode === "clinical" ? 300 : 60;
+    setSecondsLeft(initialSeconds);
+    plannedTrials.current = createCptTrials({
+      seed: Date.now(),
+      trialCount: durationMode === "clinical" ? 220 : 42,
+    });
+
     setPhase("running");
     setFeedback("Siapkan fokusmu…");
     trialTimer.current = setTimeout(() => showTrialRef.current(), 1200);
-    endTimer.current = setTimeout(endSession, TEST_DURATION);
+    endTimer.current = setTimeout(startTrailingStage, testDurationMs);
     clockTimer.current = setInterval(() => {
-      setSecondsLeft(Math.max(0, Math.ceil((TEST_DURATION - (Date.now() - startedAt.current)) / 1000)));
+      setSecondsLeft(Math.max(0, Math.ceil((testDurationMs - (Date.now() - startedAt.current)) / 1000)));
     }, 250);
   };
 
@@ -335,6 +380,11 @@ export default function ScreeningPage() {
     setStimulusVisible(false);
     setIsDemo(true);
     setDemoProfile(profile);
+
+    const demoTrailing = generateDemoTrailingSamples(profile);
+    setTrailingSamples(demoTrailing);
+    setTrailingMetrics(calculateTrailingMetrics(demoTrailing));
+
     setAsrsResult({
       totalScore: profile === "stable" ? 6 : 16,
       significantCount: profile === "stable" ? 1 : 5,
@@ -351,6 +401,58 @@ export default function ScreeningPage() {
     setPhase("results");
   };
 
+  useEffect(() => {
+    if (phase !== "trailing") return;
+    let animId = 0;
+    const duration = 10_000;
+    const startT = performance.now();
+    trailingStartedAt.current = startT;
+    let lastSampleTime = 0;
+
+    const tickTrailing = () => {
+      const now = performance.now();
+      const elapsed = now - startT;
+      const progress = elapsed / 4000; // 4s cycle
+      const ballX = 0.5 + 0.35 * Math.sin(2 * Math.PI * progress);
+      const ballY = 0.5;
+      setTrailingBallPos({ x: ballX, y: ballY });
+      setTrailingSecondsLeft(Math.max(0, Math.ceil((duration - elapsed) / 1000)));
+
+      if (now - lastSampleTime >= 50) {
+        lastSampleTime = now;
+        const currentGaze = gaze.latestSample;
+        let mappedGazeX = ballX;
+        let mappedGazeY = ballY;
+        let isValid = false;
+
+        if (currentGaze && currentGaze.valid) {
+          isValid = true;
+          mappedGazeX = Math.max(0.05, Math.min(0.95, 0.5 + (currentGaze.x - 0.5) * 2.8));
+          mappedGazeY = Math.max(0.1, Math.min(0.9, 0.5 + (currentGaze.y - 0.5) * 2.5));
+        }
+
+        trailingSamplesRef.current.push({
+          timeMs: Math.round(elapsed),
+          targetX: Math.round(ballX * 1000) / 1000,
+          targetY: Math.round(ballY * 1000) / 1000,
+          gazeX: Math.round(mappedGazeX * 1000) / 1000,
+          gazeY: Math.round(mappedGazeY * 1000) / 1000,
+          valid: isValid,
+        });
+      }
+
+      if (elapsed >= duration) {
+        completeAllTesting();
+        return;
+      }
+
+      animId = requestAnimationFrame(tickTrailing);
+    };
+
+    animId = requestAnimationFrame(tickTrailing);
+    return () => cancelAnimationFrame(animId);
+  }, [phase, gaze.latestSample, completeAllTesting]);
+
   const respond = useCallback(() => {
     if (phase !== "running") return;
     const active = activeTrialRef.current;
@@ -360,7 +462,7 @@ export default function ScreeningPage() {
     activeTrialRef.current = completed;
     trialsRef.current = [...trialsRef.current, completed];
     setTrials(trialsRef.current);
-    setFeedback(response === "hit" ? "Tepat ✓" : "Terburu-buru · tahan saat merah");
+    setFeedback(response === "hit" ? "Tepat ✓" : "Keceplosan pencet! · Jangan tekan saat merah");
   }, [phase]);
 
   useEffect(() => {
@@ -387,6 +489,9 @@ export default function ScreeningPage() {
 
   const downloadJson = () => {
     const exportPayload = buildSessionExport(sessionId, isDemo, metrics, gaze.quality, asrsResult);
+    if (!isDemo) {
+      exportPayload.duration_seconds = durationMode === "clinical" ? 300 : 60;
+    }
     const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -404,8 +509,8 @@ export default function ScreeningPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          test_version: "2.0",
-          duration_seconds: 60,
+          test_version: "2.1",
+          duration_seconds: durationMode === "clinical" ? 300 : 60,
           asrs: asrsResult
             ? {
                 total_score: asrsResult.totalScore,
@@ -427,6 +532,14 @@ export default function ScreeningPage() {
             data_coverage: isDemo ? 0 : gaze.quality.coverage,
             relative_dispersion: isDemo ? 0 : gaze.quality.relativeDispersion,
           },
+          trailing: trailingMetrics
+            ? {
+                accuracy_percent: trailingMetrics.accuracyPercent,
+                mean_deviation: trailingMetrics.meanDeviation,
+                intrusive_saccades: trailingMetrics.intrusiveSaccades,
+                status: trailingMetrics.statusLabel,
+              }
+            : undefined,
         }),
       });
       if (response.ok) {
@@ -439,7 +552,7 @@ export default function ScreeningPage() {
     } finally {
       setAnalysisLoading(false);
     }
-  }, [asrsResult, metrics, isDemo, gaze.quality]);
+  }, [asrsResult, metrics, isDemo, gaze.quality, trailingMetrics]);
 
   const submitAsrsAndProceed = () => {
     const scored = scoreAsrs(asrsAnswers);
@@ -458,12 +571,14 @@ export default function ScreeningPage() {
           <Link href="/">Beranda</Link>
           <span className="status-pill">
             {phase === "questionnaire"
-              ? "1/3 KUESIONER KRONIS"
+              ? "1/4 KUESIONER KRONIS"
               : phase === "ready"
-              ? "2/3 PRE-FLIGHT INTEGRITY"
+              ? "PRE-FLIGHT INTEGRITY"
               : phase === "running"
-              ? "3/3 TES BERJALAN"
-              : "RINGKASAN HASIL"}
+              ? "2/4 REFLEKS CPT"
+              : phase === "trailing"
+              ? "3/4 TRAILING EYES"
+              : "4/4 HASIL & RUJUKAN"}
           </span>
         </div>
         <div className="nav-right-actions">
@@ -484,7 +599,7 @@ export default function ScreeningPage() {
       {phase === "questionnaire" && (
         <section className="screening-content">
           <div className="status-pill">
-            <span className="status-dot" /> Tahap 1 dari 3: Pengenalan Gejala Harian
+            <span className="status-dot" /> Tahap 1 dari 4: Pengenalan Gejala Harian (WHO ASRS v1.1)
           </div>
           <h1 style={{ color: "var(--text-primary)" }}>
             Bagaimana pola fokusmu <em>6 bulan terakhir?</em>
@@ -532,15 +647,102 @@ export default function ScreeningPage() {
       {phase === "ready" && (
         <section className="screening-content">
           <div className="status-pill">
-            <span className="status-dot" /> Tahap 2 dari 3: Verifikasi Integritas Pengujian
+            <span className="status-dot" /> Verifikasi Integritas: Pre-Flight Checklist
           </div>
           <h1 style={{ color: "var(--text-primary)" }}>
             Standar lingkungan tes <em>terkontrol.</em>
           </h1>
           <p className="hero-lede">
             Untuk memastikan data atensi objektif dan bebas bias gangguan luar, pastikan 4 syarat integritas di bawah ini
-            terpenuhi sebelum memulai sesi 60 detik.
+            terpenuhi sebelum memulai rangkaian tes (CPT & Trailing Eyes).
           </p>
+
+          {/* SAKLAR PROTOKOL DURASI TES (DUAL-MODE) */}
+          <div
+            className="questionnaire-box"
+            style={{
+              marginBottom: "18px",
+              padding: "16px 20px",
+              border: "1px solid var(--surface-border)",
+              borderRadius: "14px",
+              background: "var(--surface-alt)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "14px" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <strong style={{ fontSize: "0.94rem", color: "var(--text-primary)" }}>
+                    Pilih Protokol Durasi Tes CPT
+                  </strong>
+                  <span
+                    style={{
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      background: durationMode === "clinical" ? "rgba(0, 210, 180, 0.15)" : "rgba(148, 163, 184, 0.15)",
+                      color: durationMode === "clinical" ? "var(--accent-teal)" : "var(--text-secondary)",
+                      border: `1px solid ${durationMode === "clinical" ? "var(--accent-teal)" : "var(--surface-border)"}`,
+                    }}
+                  >
+                    {durationMode === "clinical" ? "Rekomendasi Literatur Klinis" : "Khusus Demo Panggung"}
+                  </span>
+                </div>
+                <p style={{ margin: "4px 0 0", fontSize: "0.80rem", color: "var(--text-secondary)", lineHeight: 1.5, maxWidth: "560px" }}>
+                  {durationMode === "clinical"
+                    ? "Mode Standar Klinis (5 Menit / 300s): Mengacu literatur neuropsikologi (rentang baku 4-7 menit) untuk menangkap kelelahan atensi nyata (vigilance decrement) setelah efek kebaruan awal habis."
+                    : "Mode Demo Cepat (60 Detik / 60s): Ringkas dan efisien untuk peragaan panggung hackathon atau simulasi fitur instan."}
+                </p>
+              </div>
+
+              {/* Saklar Segmented Control */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  background: "var(--surface)",
+                  padding: "4px",
+                  borderRadius: "12px",
+                  border: "1px solid var(--surface-border)",
+                  gap: "4px",
+                }}
+              >
+                <button
+                  type="button"
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: "0.80rem",
+                    fontWeight: 700,
+                    borderRadius: "8px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: durationMode === "quick" ? "var(--accent-teal)" : "transparent",
+                    color: durationMode === "quick" ? "#04251e" : "var(--text-secondary)",
+                    transition: "all 0.15s ease",
+                  }}
+                  onClick={() => setDurationMode("quick")}
+                >
+                  60 Detik (Demo Cepat)
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    padding: "8px 16px",
+                    fontSize: "0.80rem",
+                    fontWeight: 700,
+                    borderRadius: "8px",
+                    border: "none",
+                    cursor: "pointer",
+                    background: durationMode === "clinical" ? "var(--accent-teal)" : "transparent",
+                    color: durationMode === "clinical" ? "#04251e" : "var(--text-secondary)",
+                    transition: "all 0.15s ease",
+                  }}
+                  onClick={() => setDurationMode("clinical")}
+                >
+                  5 Menit (Standar Klinis)
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* 4-Step Pre-Flight Checklist Card */}
           <div className="questionnaire-box" style={{ marginBottom: "20px" }}>
@@ -621,13 +823,13 @@ export default function ScreeningPage() {
           </div>
 
           <div className="setup-card">
-            <strong>Latihan Cepat Respon Motorik</strong>
+            <strong>Latihan Cepat Respon Motorik (Aturan Lampu)</strong>
             <p style={{ margin: "6px 0 14px", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
               {practiceStep === "go"
-                ? "Simulasi Go: Lingkaran hijau menyala sejenak lalu kembali ke tanda plus (+). Tekan tombol."
+                ? "Simulasi Hijau (Go): Lingkaran hijau menyala sejenak lalu kembali ke (+). Segera tekan tombol secepatnya."
                 : practiceStep === "no-go"
-                ? "Simulasi No-Go: Lingkaran merah menyala sejenak. Tahan jarimu, jangan menekan."
-                : "Latihan selesai! Sensor saraf motorikmu sudah terkalibrasi untuk sesi penuh."}
+                ? "Simulasi Merah (Stop): Lingkaran merah menyala sejenak. JANGAN DITEKAN! Lepas jarimu dan biarkan merahnya lewat."
+                : "Latihan selesai! Refleks motorikmu sudah paham kapan harus memencet dan kapan harus melepaskan jari."}
             </p>
             {practiceStep !== "done" ? (
               <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
@@ -640,7 +842,7 @@ export default function ScreeningPage() {
                   }}
                 />
                 <button type="button" className="secondary-button" onClick={advancePractice}>
-                  {practiceStep === "go" ? "Coba Tekan Target Hijau" : "Saya Paham Target Merah Ditahan"}
+                  {practiceStep === "go" ? "Coba Tekan Target Hijau" : "Paham: Merah Jangan Dipencet"}
                 </button>
               </div>
             ) : (
@@ -681,7 +883,7 @@ export default function ScreeningPage() {
                 startTest();
               }}
             >
-              Mulai Tes 60 Detik Terkontrol <span aria-hidden="true">→</span>
+              Mulai Tes Terkontrol (CPT & Trailing Eyes) <span aria-hidden="true">→</span>
             </button>
             <button className="text-link" onClick={() => setPhase("questionnaire")}>
               ← Ubah Jawaban Kuesioner
@@ -734,7 +936,7 @@ export default function ScreeningPage() {
 
           <div className="cpt-topbar">
             <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.08em", color: "var(--muted)" }}>
-              SESI TES REFLEKS AKTIF
+              TAHAP 2/4: UJI REFLEKS (CPT HOLD & STOP)
             </span>
             <span className="cpt-timer">{secondsLeft}s</span>
           </div>
@@ -753,7 +955,7 @@ export default function ScreeningPage() {
                   : "beacon-idle"
               }`}
             >
-              <span>{stimulusVisible ? (trial?.kind === "go" ? "GO" : "NO-GO") : trial ? "+" : "READY"}</span>
+              <span>{stimulusVisible ? (trial?.kind === "go" ? "GO" : "STOP") : trial ? "+" : "READY"}</span>
             </div>
 
             <div className="cpt-feedback-text">{feedback}</div>
@@ -767,9 +969,78 @@ export default function ScreeningPage() {
               type="button"
               className="secondary-button"
               style={{ height: "64px", borderRadius: "16px" }}
-              onClick={endSession}
+              onClick={startTrailingStage}
             >
-              Akhiri Sesi Lebih Awal
+              Lanjut ke Tahap 3: Trailing Eyes →
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* PHASE 3: Trailing Eyes Stage (Smooth Pursuit) */}
+      {phase === "trailing" && (
+        <section className="cpt-viewport" aria-live="polite">
+          <div className="cpt-topbar">
+            <span style={{ fontSize: "0.78rem", fontWeight: 700, letterSpacing: "0.08em", color: "var(--accent-teal)" }}>
+              TAHAP 3/4: TRAILING EYES (SMOOTH PURSUIT)
+            </span>
+            <span className="cpt-timer">{trailingSecondsLeft}s</span>
+          </div>
+
+          <div className="cpt-stage-center" style={{ position: "relative", overflow: "hidden" }}>
+            {cameraStatus === "ready" && (
+              <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
+            )}
+
+            {/* Target Trailing Rail Guide */}
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "12%",
+                right: "12%",
+                height: "2px",
+                background: "rgba(0, 210, 180, 0.25)",
+                transform: "translateY(-50%)",
+              }}
+            />
+
+            {/* Moving Target Ball */}
+            <div
+              style={{
+                position: "absolute",
+                left: `${trailingBallPos.x * 100}%`,
+                top: `${trailingBallPos.y * 100}%`,
+                width: "44px",
+                height: "44px",
+                borderRadius: "50%",
+                background: "radial-gradient(circle, #00d2b4 25%, #0891b2 85%)",
+                boxShadow: "0 0 20px rgba(0, 210, 180, 0.8), 0 0 45px rgba(0, 210, 180, 0.4)",
+                transform: "translate(-50%, -50%)",
+                display: "grid",
+                placeItems: "center",
+                pointerEvents: "none",
+              }}
+            >
+              <div style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ffffff" }} />
+            </div>
+
+            <div className="cpt-feedback-text" style={{ position: "absolute", bottom: "24px" }}>
+              Tahan posisi kepala tetap diam. Ikuti bola cyan dengan tatapan mata Anda.
+            </div>
+          </div>
+
+          <div className="trigger-zone-wrap">
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.85rem", textAlign: "center", padding: "8px 12px" }}>
+              Kamera merekam sinkronisasi koordinat pupil mata terhadap lintasan target sinusoidal (Smooth Pursuit)...
+            </div>
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ height: "54px", borderRadius: "14px" }}
+              onClick={completeAllTesting}
+            >
+              Selesai & Lihat Hasil Rujukan →
             </button>
           </div>
         </section>
@@ -780,7 +1051,7 @@ export default function ScreeningPage() {
         <section className="screening-content">
           <div className="results-header">
             <div className="status-pill">
-              <span className="status-dot" /> {isDemo ? `Simulasi Benchmark · ${demoProfile.toUpperCase()}` : `Sesi Selesai · ${formatSessionDate(sessionStartedAt)}`}
+              <span className="status-dot" /> Tahap 4 dari 4: {isDemo ? `Simulasi Benchmark · ${demoProfile.toUpperCase()}` : `Sesi Selesai (${durationMode === "clinical" ? "5 Menit Standar Klinis" : "60s Demo Cepat"}) · ${formatSessionDate(sessionStartedAt)}`}
             </div>
             <h1 style={{ color: "var(--text-primary)" }}>
               Hasil Pengamatan <em>Ritme Fokusmu.</em>
@@ -837,7 +1108,7 @@ export default function ScreeningPage() {
                 <div className="result-card-value">{metrics.commissions} Kali</div>
                 <div className="result-card-desc">
                   {analysisMode === "layperson"
-                    ? "Frekuensi jarimu keliru menekan target merah yang seharusnya ditahan."
+                    ? "Frekuensi jarimu keliru menekan target merah yang seharusnya dilepas/didiamkan."
                     : `Commission Error Rate: ${percent(metrics.commissionRate)}. Indikator impulsivitas motorik.`}
                 </div>
               </div>
@@ -937,6 +1208,15 @@ export default function ScreeningPage() {
             )}
           </div>
 
+          {/* Trailing Eyes Smooth Pursuit Visualization */}
+          {trailingMetrics && (
+            <TrailingVisualization
+              samples={trailingSamples}
+              metrics={trailingMetrics}
+              isDemo={isDemo}
+            />
+          )}
+
           {/* Attention Fatigue Curve */}
           <div className="attention-curve">
             <div className="curve-heading">
@@ -961,32 +1241,13 @@ export default function ScreeningPage() {
             </div>
           </div>
 
-          {/* Gaze Plot (Shown for both real usable gaze and synthetic demo) */}
+          {/* Radar Bullseye Thermal Heatmap (Shown for both real usable gaze and synthetic demo) */}
           {((!isDemo && gaze.quality.status === "usable") || isDemo) && (
-            <div className="gaze-panel">
-              <div className="curve-heading">
-                <strong>Kestabilan Tatapan Mata {isDemo ? "(Simulasi Sintetis)" : ""}</strong>
-                <span>{isDemo ? "Demo 48 Titik Fiksasi" : "48 Sampel Terakhir"}</span>
-              </div>
-              <div className="gaze-plot">
-                {(isDemo ? (demoProfile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE) : gaze.trace)
-                  .filter((s) => s.valid)
-                  .map((s, i) => (
-                    <i
-                      key={i}
-                      style={{
-                        left: `${Math.max(0, Math.min(1, s.x)) * 100}%`,
-                        top: `${Math.max(0, Math.min(1, s.y)) * 100}%`,
-                      }}
-                    />
-                  ))}
-              </div>
-              <p style={{ fontSize: "0.74rem", color: "var(--muted)", margin: "8px 0 0" }}>
-                {isDemo
-                  ? "Peta sebaran tatapan mata sintetis untuk keperluan peragaan panggung tanpa kamera aktif."
-                  : "Makin rapat titik di tengah salib, makin tenang fiksasi matamu saat stimulus muncul."}
-              </p>
-            </div>
+            <RadarGazeHeatmap
+              samples={isDemo ? (demoProfile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE) : gaze.trace}
+              gdiScore={isDemo ? (demoProfile === "stable" ? 0.038 : 0.142) : gaze.quality.relativeDispersion}
+              isDemo={isDemo}
+            />
           )}
 
           {/* Footer Actions & Export */}

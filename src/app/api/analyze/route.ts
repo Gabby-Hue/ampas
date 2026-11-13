@@ -10,6 +10,7 @@ type AnalyzePayload = {
   };
   cpt?: { go_trials?: number; no_go_trials?: number; hit_rate?: number; omission_rate?: number; commission_rate?: number; median_rt_ms?: number | null; rt_variability_ms?: number | null };
   gaze?: { status?: "usable" | "limited" | "unavailable"; data_coverage?: number; relative_dispersion?: number };
+  trailing?: { accuracy_percent?: number; mean_deviation?: number; intrusive_saccades?: number; status?: string };
 };
 type AnalysisResult = {
   source: string;
@@ -83,9 +84,13 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
 
   const cptNote = `Objektifikasi CPT Go/No-Go menunjukkan Hit Rate ${Math.round((cpt.hit_rate ?? 0) * 100)}%, Omission Rate ${Math.round((cpt.omission_rate ?? 0) * 100)}%, Commission Rate ${Math.round((cpt.commission_rate ?? 0) * 100)}%, Median RT ${cpt.median_rt_ms ?? 0} ms, RTV ${cpt.rt_variability_ms ?? 0} ms.`;
 
-  const gazeNote = payload.gaze?.status === "usable"
+  const trailingNote = payload.trailing?.status
+    ? ` Uji penelusuran visual Trailing Eyes (Smooth Pursuit): Akurasi ${payload.trailing.accuracy_percent ?? 0}%, Deviasi RMS ${payload.trailing.mean_deviation ?? 0}, Saccadic Intrusions ${payload.trailing.intrusive_saccades ?? 0} kali (${payload.trailing.status}).`
+    : "";
+
+  const gazeNote = (payload.gaze?.status === "usable"
     ? `Pemantauan stabilitas fiksasi okulomotorik (Webcam Gaze On-Device) mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}% dengan dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}.`
-    : "Sensor gaze tidak aktif atau coverage sub-optimal; analisis okulomotor diabaikan.";
+    : "Sensor gaze fiksasi sub-optimal;") + trailingNote;
 
   return {
     source: "local-dual-tone-guardrail-v2",
