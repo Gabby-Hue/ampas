@@ -10,12 +10,22 @@ export type CptTrial = {
   delayMs: number;
   blockIndex?: number;
   blockPhase?: BlockPhase;
+  /** Normalized X position of stimulus center on screen (0-1). Default: 0.5 = center */
+  stimulusX?: number;
+  /** Normalized Y position of stimulus center on screen (0-1). Default: 0.5 = center */
+  stimulusY?: number;
 };
 
 export type CptEvent = CptTrial & {
   shownAt: number;
   respondedAt?: number;
   response?: TrialResponse;
+};
+
+export type ExGaussianParams = {
+  mu: number | null;   // Gaussian mean component (cognitive processing speed)
+  sigma: number | null; // Gaussian std component (variability)
+  tau: number | null;   // Exponential component (impulsivity / right skew)
 };
 
 export type CptMetrics = {
@@ -31,6 +41,7 @@ export type CptMetrics = {
   commissionRate: number;
   medianReactionTimeMs: number | null;
   reactionTimeVariabilityMs: number | null;
+  exGaussian: ExGaussianParams;
 };
 
 export type ClinicalStats = {
@@ -55,6 +66,10 @@ export const BLOCK_PHASE_LABELS: Record<BlockPhase, string> = {
   recovery: "Exhaustion Recovery",
 };
 
+// Default stimulus at screen center
+const DEFAULT_STIMULUS_X = 0.5;
+const DEFAULT_STIMULUS_Y = 0.5;
+
 function seededRandom(seed: number) {
   let state = seed >>> 0;
   return () => {
@@ -69,6 +84,8 @@ export function createCptTrials({ seed, trialCount }: CptFixture): CptTrial[] {
     index,
     kind: random() < 0.7 ? "go" : "no-go",
     delayMs: 1000 + Math.floor(random() * 1201),
+    stimulusX: DEFAULT_STIMULUS_X,
+    stimulusY: DEFAULT_STIMULUS_Y,
   }));
 }
 
@@ -110,6 +127,8 @@ export function createStructuredCptTrials(mode: TestMode, seed = 20261111): CptT
         delayMs: spec.minIsiMs + Math.floor(random() * span),
         blockIndex,
         blockPhase: spec.phase,
+        stimulusX: DEFAULT_STIMULUS_X,
+        stimulusY: DEFAULT_STIMULUS_Y,
       });
     }
   });
@@ -133,6 +152,36 @@ function mean(values: number[]) {
   return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
 }
 
+/**
+ * Ex-Gaussian decomposition of reaction times.
+ * RT ~ N(mu, sigma^2) + Exp(tau)
+ * tau = mean - median (right-skew proxy for impulsivity)
+ * Higher tau → more impulsive responding (ADHD hallmark)
+ */
+export function decomposeExGaussian(reactionTimes: number[]): ExGaussianParams {
+  if (reactionTimes.length < 10) {
+    return { mu: null, sigma: null, tau: null };
+  }
+  const sorted = [...reactionTimes].sort((a, b) => a - b);
+  const n = sorted.length;
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  const mean = sum / n;
+  const median = n % 2 ? sorted[Math.floor(n / 2)] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+  const variance = sorted.reduce((sum, v) => sum + (v - mean) ** 2, 0) / n;
+  const std = Math.sqrt(variance);
+
+  // Method-of-moments estimation (simple approximation)
+  const tau = Math.max(0, mean - median);
+  const sigma = Math.sqrt(Math.max(0, std * std - tau * tau));
+  const mu = mean - tau;
+
+  return {
+    mu: Math.round(mu),
+    sigma: Math.round(Math.max(0, sigma)),
+    tau: Math.round(Math.max(0, tau)),
+  };
+}
+
 export function calculateCptMetrics(events: CptEvent[]): CptMetrics {
   const go = events.filter((event) => event.kind === "go");
   const noGo = events.filter((event) => event.kind === "no-go");
@@ -145,6 +194,8 @@ export function calculateCptMetrics(events: CptEvent[]): CptMetrics {
   );
   const average = mean(reactionTimes);
   const variance = reactionTimes.length ? mean(reactionTimes.map((value) => (value - average) ** 2)) : 0;
+  const exGaussian = decomposeExGaussian(reactionTimes);
+
   return {
     totalTrials: events.length,
     goTrials: go.length,
@@ -158,6 +209,7 @@ export function calculateCptMetrics(events: CptEvent[]): CptMetrics {
     commissionRate: noGo.length ? commissions.length / noGo.length : 0,
     medianReactionTimeMs: median(reactionTimes),
     reactionTimeVariabilityMs: reactionTimes.length ? Math.round(Math.sqrt(variance)) : null,
+    exGaussian,
   };
 }
 
@@ -337,5 +389,59 @@ export function calculateClinicalStats(events: CptEvent[]): ClinicalStats {
     attentionLapses,
     fatigueSlope: rawFatigueSlope !== null ? Math.round(rawFatigueSlope * 1000) / 1000 : null,
     rtSlopeMsPerBlock: rawRtSlope !== null ? Math.round(rawRtSlope * 10) / 10 : null,
+  };
+}
+
+export type TrialGdiResult = {
+  trialIndex: number;
+  gdi: number | null;
+  sampleCount: number;
+};
+
+/**
+ * Calculate per-trial Gaze Dispersion Index (GDI).
+ * For each trial, finds gaze samples within [shownAt, shownAt + delayMs] window
+ * and computes dispersion from the stimulus position.
+ */
+export function calculateTrialGdis(
+  events: CptEvent[],
+  gazeSamples: Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>
+): TrialGdiResult[] {
+  return events.map((event) => {
+    const sx = event.stimulusX ?? DEFAULT_STIMULUS_X;
+    const sy = event.stimulusY ?? DEFAULT_STIMULUS_Y;
+    const windowSamples = gazeSamples.filter((s) => {
+      if (s.recordedAt === undefined) return false;
+      return s.recordedAt >= event.shownAt && s.recordedAt <= (event.respondedAt ?? event.shownAt + event.delayMs);
+    });
+    const validSamples = windowSamples.filter((s) => s.valid && Number.isFinite(s.x) && Number.isFinite(s.y));
+    if (validSamples.length === 0) {
+      return { trialIndex: event.index, gdi: null, sampleCount: 0 };
+    }
+    const sqDists = validSamples.map((s) => (s.x - sx) ** 2 + (s.y - sy) ** 2);
+    const gdi = Math.sqrt(sqDists.reduce((a, b) => a + b, 0) / sqDists.length);
+    return { trialIndex: event.index, gdi: Math.round(gdi * 1000) / 1000, sampleCount: validSamples.length };
+  });
+}
+
+/**
+ * Aggregate per-trial GDI into summary stats.
+ */
+export function summarizeGdiResults(results: TrialGdiResult[]): {
+  meanGdi: number | null;
+  maxGdi: number | null;
+  minGdi: number | null;
+  trialsWithData: number;
+} {
+  const valid = results.filter((r) => r.gdi !== null);
+  if (valid.length === 0) {
+    return { meanGdi: null, maxGdi: null, minGdi: null, trialsWithData: 0 };
+  }
+  const gdis = valid.map((r) => r.gdi!).filter((g): g is number => g !== null);
+  return {
+    meanGdi: Math.round((gdis.reduce((a, b) => a + b, 0) / gdis.length) * 1000) / 1000,
+    maxGdi: Math.round((Math.max(...gdis)) * 1000) / 1000,
+    minGdi: Math.round((Math.min(...gdis)) * 1000) / 1000,
+    trialsWithData: valid.length,
   };
 }

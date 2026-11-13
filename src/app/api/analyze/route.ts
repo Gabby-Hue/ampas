@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getPretrainedModel, predictAdhdRisk } from "@/lib/ml/classifier";
+import type { FeatureVector } from "@/lib/ml/synthetic";
 
 type AnalyzeBlock = {
   label?: string;
@@ -44,12 +46,28 @@ type AnalyzePayload = {
     data_coverage?: number;
     relative_dispersion?: number;
     out_of_bounds_rate?: number;
+    mean_gdi?: number;
+    max_gdi?: number;
+    trials_with_gaze_data?: number;
+  };
+  ex_gaussian?: {
+    mu_ms?: number | null;
+    sigma_ms?: number | null;
+    tau_ms?: number | null;
   };
 };
 
 type AnalysisResult = {
   source: string;
   is_diagnostic: false;
+  ml_prediction?: {
+    model_version: string;
+    adhd_probability: number;
+    classification: "adhd" | "nt";
+    confidence: number;
+    trained_on: string;
+    accuracy: number;
+  };
   layperson_insight: {
     stamina_headline: string;
     stamina_description: string;
@@ -164,9 +182,33 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
     cpt.fatigue_slope != null ? `Fatigue Slope: ${cpt.fatigue_slope}/blok` : "Fatigue Slope: N/A";
   const cptNote = `CPT Go/No-Go (${payload.test_mode ?? "clinical"}, ${payload.duration_seconds ?? 360}s): Hit Rate ${Math.round((cpt.hit_rate ?? 0) * 100)}%, Omission ${Math.round((cpt.omission_rate ?? 0) * 100)}%, Commission ${Math.round((cpt.commission_rate ?? 0) * 100)}%, Median RT ${cpt.median_rt_ms ?? 0} ms, RTV ${cpt.rt_variability_ms ?? 0} ms, ${dPrimeText}, ${slopeText}, Antisipasi (<120ms): ${cpt.anticipatory_responses ?? 0}, Lapses (>750ms): ${cpt.attention_lapses ?? 0}, Interupsi Tab: ${payload.tab_interruptions ?? 0}.`;
 
+  // Build ML feature vector from payload
+  const mlFeatureVector: FeatureVector = {
+    commission_rate: cpt.commission_rate ?? 0,
+    omission_rate: cpt.omission_rate ?? 0,
+    median_rt_ms: cpt.median_rt_ms ?? 440,
+    rt_variability_ms: cpt.rt_variability_ms ?? 60,
+    d_prime: cpt.d_prime ?? 2.0,
+    fatigue_slope: cpt.fatigue_slope ?? -0.02,
+    tau_ms: payload.ex_gaussian?.tau_ms ?? null,
+    asrs_score: payload.asrs?.total_score ?? 4,
+  };
+
+  // Run ML classification
+  const mlModel = getPretrainedModel();
+  const mlPrediction = predictAdhdRisk(mlFeatureVector, mlModel);
+
+  // Incorporate GDI into gaze note
+  const meanGdi = payload.gaze?.mean_gdi;
+  const trialsWithGaze = payload.gaze?.trials_with_gaze_data ?? 0;
+  const gdiInterpretation =
+    meanGdi !== undefined && meanGdi > 0
+      ? `Gaze Dispersion Index (rata-rata ${meanGdi.toFixed(3)} satuan layar) pada ${trialsWithGaze} trial dengan data tatapan.`
+      : "";
+
   const gazeNote =
     payload.gaze?.status === "usable"
-      ? `Pelacakan fiksasi MediaPipe On-Device mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}%, dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}, dan out-of-bounds rate ${Math.round((payload.gaze.out_of_bounds_rate ?? 0) * 100)}%.`
+      ? `Pelacakan fiksasi MediaPipe On-Device mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}%, dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}, dan out-of-bounds rate ${Math.round((payload.gaze.out_of_bounds_rate ?? 0) * 100)}%.${gdiInterpretation}`
       : "Sensor okulomotorik tidak aktif atau coverage berada di bawah ambang kualitas; interpretasi difokuskan pada psikometri motorik CPT.";
 
   const recs: string[] = [
@@ -181,6 +223,14 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
   return {
     source: "local-clinical-triangulation-v3",
     is_diagnostic: false,
+    ml_prediction: {
+      model_version: "logreg-synthetic-v1",
+      adhd_probability: mlPrediction.probability,
+      classification: mlPrediction.classification,
+      confidence: mlPrediction.confidence,
+      trained_on: "synthetic-distribution-adapted-from-Rojas-Libano-2019",
+      accuracy: mlModel.accuracy,
+    },
     layperson_insight: {
       stamina_headline: staminaHeadline,
       stamina_description: staminaDesc,

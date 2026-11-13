@@ -241,7 +241,8 @@ export function useGazeTracking(
 
               if (recordSamplesRef.current) {
                 const calibrated = applyGazeCalibration(rawSample, calibrationRef.current);
-                samplesRef.current.push(calibrated);
+                const withTimestamp = { ...calibrated, recordedAt: now };
+                samplesRef.current.push(withTimestamp);
                 if (samplesRef.current.length > 360) samplesRef.current.shift();
                 setQuality(calculateGazeQuality(samplesRef.current));
                 setOutOfBoundsRate(calculateOutOfBoundsRate(samplesRef.current));

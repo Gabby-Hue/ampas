@@ -29,12 +29,21 @@ import {
 import { useGazeTracking } from "@/lib/gaze/tracking";
 import type { GazeSample } from "@/lib/gaze/quality";
 import { buildSessionExport } from "@/lib/export/session";
+import { calculateTrialGdis, summarizeGdiResults, type CptMetrics, type ClinicalStats } from "@/lib/cpt/engine";
 
 type Phase = "questionnaire" | "ready" | "running" | "results";
 type Trial = CptEvent;
 
 type ApiAnalysis = {
   source?: string;
+  ml_prediction?: {
+    model_version: string;
+    adhd_probability: number;
+    classification: "adhd" | "nt";
+    confidence: number;
+    trained_on: string;
+    accuracy: number;
+  };
   layperson_insight: {
     stamina_headline: string;
     stamina_description: string;
@@ -321,6 +330,14 @@ export default function ScreeningPage() {
               data_coverage: demoFlag ? 0 : gaze.quality.coverage,
               relative_dispersion: demoFlag ? 0 : gaze.quality.relativeDispersion,
               out_of_bounds_rate: demoFlag ? 0 : gaze.outOfBoundsRate,
+              mean_gdi: demoFlag ? 0 : (gdiSummary.meanGdi ?? 0),
+              max_gdi: demoFlag ? 0 : (gdiSummary.maxGdi ?? 0),
+              trials_with_gaze_data: demoFlag ? 0 : gdiSummary.trialsWithData,
+            },
+            ex_gaussian: demoFlag ? null : {
+              mu_ms: m.exGaussian.mu,
+              sigma_ms: m.exGaussian.sigma,
+              tau_ms: m.exGaussian.tau,
             },
           }),
         });
@@ -371,6 +388,7 @@ export default function ScreeningPage() {
         durationSeconds: elapsedSec,
         tabInterruptions: tabDistractionCount,
         outOfBoundsRate: gaze.outOfBoundsRate,
+        gdiSummary: gdiSummary,
       });
       persistSessionToStorage({
         sessionId: sessionId || "OC-LOCAL",
@@ -651,6 +669,18 @@ export default function ScreeningPage() {
   const clinicalStats = useMemo(() => calculateClinicalStats(trials), [trials]);
   const attentionBlocks = useMemo(() => calculateAttentionBlocks(trials), [trials]);
 
+  // Compute per-trial GDI from gaze samples and trial events
+  const allGazeSamples = useMemo(() => {
+    // Build flat array of all recorded samples from the tracking hook
+    return (gaze.trace as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>) ?? [];
+  }, [gaze.trace]);
+
+  const trialGdis = useMemo(
+    () => calculateTrialGdis(trials, allGazeSamples),
+    [trials, allGazeSamples]
+  );
+  const gdiSummary = useMemo(() => summarizeGdiResults(trialGdis), [trialGdis]);
+
   const currentBlockNumber = (trial?.blockIndex ?? 0) + 1;
   const totalBlocksCount = subjectContext.testMode === "clinical" ? 6 : 3;
 
@@ -663,6 +693,7 @@ export default function ScreeningPage() {
       durationSeconds: actualDurationSec,
       tabInterruptions: tabDistractionCount,
       outOfBoundsRate: gaze.outOfBoundsRate,
+      gdiSummary,
     });
     const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -715,7 +746,8 @@ export default function ScreeningPage() {
   const gateReady = consent && cameraReady && practicePassed && fullscreenReady;
 
   return (
-    <main className="site-shell screening-shell">
+    <main className={`site-shell screening-shell ${phase === "ready" || phase === "running" ? "exam-mode-hide-nav" : ""}`}>
+      {(phase !== "ready" && phase !== "running") && (
       <nav className="nav-wrap">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
@@ -724,13 +756,11 @@ export default function ScreeningPage() {
         <div className="nav-center-menu">
           <Link href="/">Beranda</Link>
           <span className="status-pill">
-            {phase === "ready"
-              ? "Persiapan dan kalibrasi"
-              : phase === "questionnaire"
+            {phase === "questionnaire"
               ? `Sesi 1, soal ${asrsStep + 1} dari ${ASRS_QUESTIONS.length}`
-              : phase === "running"
-              ? `Sesi 2, blok ${currentBlockNumber} dari ${totalBlocksCount}`
-              : "Ringkasan hasil"}
+              : phase === "results"
+              ? "Ringkasan hasil"
+              : "Persiapan"}
           </span>
         </div>
         <div className="nav-right-actions">
@@ -744,6 +774,7 @@ export default function ScreeningPage() {
           )}
         </div>
       </nav>
+      )}
 
       {/* STEP 2 (SESI 1): WHO ASRS - Zen Likert Scale 1 Soal per Halaman */}
       {phase === "questionnaire" && (
@@ -809,106 +840,36 @@ export default function ScreeningPage() {
         </section>
       )}
 
-      {/* STEP 1 (PERSIAPAN): Minimalist Optical HUD Reticle & Clean Sensors */}
+      {/* STEP 1 (PERSIAPAN): Minimal — kamera saja, tidak bisa diselesaikan */}
       {phase === "ready" && (
         <section className="lab-viewport">
-          <div className="lab-frame">
-            <div className="lab-header">
-              <span className="lab-tag">Langkah 1 dari 3, persiapan</span>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ minHeight: 32, padding: "5px 12px", fontSize: "0.74rem" }}
-                onClick={() => loadBenchmark("stable")}
-                title="Muat data sampel untuk demonstrasi"
-              >
-                Muat data demo
-              </button>
-            </div>
-
-            <p className="lab-intro">
-              Tempelkan wajah di dalam lingkaran dan hadapkan ke sumber cahaya. Pembacaan iris
-              berlangsung di perangkat ini, dan video tidak pernah diunggah.
+          <div className="lab-frame" style={{ textAlign: "center", padding: "48px 24px" }}>
+            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
+              Arahkan wajah Anda ke kamera dan pastikan cahaya cukup.<br />
+              Tes akan dimulai secara otomatis setelah persiapan selesai.
             </p>
 
-            {/* Circular Optical Reticle */}
-            <div className="reticle-container">
+            {/* Circular Camera Preview */}
+            <div className="reticle-container" style={{ maxWidth: 320, margin: "0 auto 28px" }}>
               {cameraStatus === "ready" ? (
-                <video ref={videoRef} muted playsInline />
+                <video ref={videoRef} muted playsInline style={{ width: "100%", borderRadius: "50%" }} />
               ) : (
-                <div className="reticle-placeholder">
-                  <span className="reticle-hint-label">Kamera standby</span>
+                <div className="reticle-placeholder" style={{ height: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <span className="reticle-hint-label">Kamera siap</span>
                   <span className="reticle-hint-sub">Pusatkan wajah di dalam lingkaran</span>
                 </div>
               )}
               <div className="reticle-crosshair" />
             </div>
 
-            {/* 3 Discrete Sensor Status Indicators */}
-            <div className="sensor-bar">
-              <div className="sensor-item">
-                <span
-                  className={`sensor-dot-light ${
-                    cameraStatus === "ready"
-                      ? gaze.env.brightness >= 30
-                        ? "active"
-                        : "warning"
-                      : cameraStatus === "denied"
-                      ? "danger"
-                      : ""
-                  }`}
-                />
-                <span>Cahaya</span>
-              </div>
-              <div className="sensor-item">
-                <span
-                  className={`sensor-dot-light ${
-                    cameraStatus === "ready"
-                      ? gaze.env.face.faceCentered
-                        ? "active"
-                        : "warning"
-                      : cameraStatus === "denied"
-                      ? "danger"
-                      : ""
-                  }`}
-                />
-                <span>Jarak</span>
-              </div>
-              <div className="sensor-item">
-                <span
-                  className={`sensor-dot-light ${
-                    cameraStatus === "ready"
-                      ? gaze.status === "tracking"
-                        ? "active"
-                        : "warning"
-                      : cameraStatus === "denied"
-                      ? "danger"
-                      : ""
-                  }`}
-                />
-                <span>Mata</span>
-              </div>
-            </div>
-
-            {/* Camera controls */}
-            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "24px", flexWrap: "wrap" }}>
+            {/* Controls */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "20px", flexWrap: "wrap" }}>
               {cameraStatus !== "ready" ? (
-                <button
-                  type="button"
-                  className="primary-button"
-                  onClick={enableCamera}
-                  disabled={cameraStatus === "starting"}
-                >
-                  {cameraStatus === "starting" ? "Menghubungkan..." : "Aktifkan sensor kamera"}
+                <button type="button" className="primary-button" onClick={enableCamera} disabled={cameraStatus === "starting"}>
+                  {cameraStatus === "starting" ? "Menghubungkan..." : "Aktifkan kamera"}
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={stopCamera}
-                >
-                  Matikan kamera
-                </button>
+                <button type="button" className="secondary-button" onClick={stopCamera}>Matikan kamera</button>
               )}
               <button
                 type="button"
@@ -921,97 +882,22 @@ export default function ScreeningPage() {
               </button>
             </div>
 
-            {/* Practice and consent strip */}
-            <div className="practice-strip">
-              <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-                <div
-                  className="practice-dot"
-                  style={{
-                    background: practiceStimulusVisible
-                      ? practiceKind === "go"
-                        ? "#34d399"
-                        : "#ef4444"
-                      : undefined,
-                  }}
-                />
-                <div className="practice-copy">
-                  <div className="practice-title">
-                    {practiceState === "running"
-                      ? "Tekan Space saat lingkaran hijau muncul"
-                      : practiceState === "passed"
-                      ? `Latihan motorik lolos (${practiceScore}/6)`
-                      : "Uji coba respons stimulus 250 ms"}
-                  </div>
-                  <div className="practice-feedback">{practiceFeedback}</div>
-                </div>
-              </div>
-              {practiceState === "running" ? (
-                <button
-                  type="button"
-                  className="primary-button"
-                  style={{ minHeight: 34, padding: "6px 14px", fontSize: "0.78rem" }}
-                  onClick={handlePracticeRespond}
-                >
-                  Respons
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  style={{ minHeight: 34, padding: "6px 14px", fontSize: "0.78rem" }}
-                  onClick={startGuidedPractice}
-                >
-                  {practiceState === "passed" ? "Ulangi" : "Coba (6x)"}
-                </button>
-              )}
-            </div>
-
-            {/* Integrity gate: every condition must be ready before the session starts */}
-            <div className="gate-grid">
-              {[
-                { ok: cameraReady, label: skipCamera ? "Kamera dilewati" : "Kamera aktif" },
-                { ok: practicePassed, label: "Latihan motorik lolos" },
-                { ok: fullscreenReady, label: fullscreenSupported ? "Layar penuh aktif" : "Layar penuh tidak didukung" },
-                { ok: consent, label: "Persetujuan non-medis" },
-              ].map((gate) => (
-                <div key={gate.label} className={`gate-item ${gate.ok ? "is-ready" : ""}`}>
-                  <span className={`sensor-dot-light ${gate.ok ? "active" : ""}`} />
-                  {gate.label}
-                </div>
-              ))}
-            </div>
-
-            {fullscreenError && (
-              <p style={{ margin: "0 0 14px", fontSize: "0.76rem", color: "var(--coral-danger)" }} role="alert">
-                {fullscreenError}
-              </p>
-            )}
-
-            <div className="lab-footer">
-              <label className="check-field">
-                <input
-                  type="checkbox"
-                  checked={consent}
-                  onChange={(e) => setConsent(e.target.checked)}
-                />
-                Setuju instrumen penapisan non-medis
-              </label>
-
-              <button
-                className="primary-button"
-                disabled={!gateReady}
-                onClick={() => void proceedToSesi1()}
-              >
-                Mulai Sesi 1, Kuesioner
-              </button>
-            </div>
+            {/* Demo load */}
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.6 }}
+              onClick={() => loadBenchmark("stable")}
+            >
+              Muat data demo
+            </button>
           </div>
         </section>
       )}
 
-      {/* PHASE 3: Pure Sensory Blind CPT Stage (Zero Clutter, Precision Geometric Focus) */}
+      {/* PHASE 3: Pure Sensory Blind CPT Stage — white exam-paper look, no nav, no hint */}
       {phase === "running" && (
-        <section className="pure-cpt-canvas" aria-live="polite">
+        <section className="pure-cpt-canvas exam-white" aria-live="polite">
           {isTestPaused && (
             <div
               style={{
@@ -1061,10 +947,6 @@ export default function ScreeningPage() {
                 className={`stimulus-shape ${trial.kind === "no-go" ? "shape-stop" : ""}`}
               />
             )}
-          </div>
-
-          <div className="cpt-subtle-hint">
-            TEKAN [SPACEBAR] SAAT LINGKARAN HIJAU MUNCUL · TAHAN PADA KOTAK MERAH
           </div>
         </section>
       )}
@@ -1164,6 +1046,62 @@ export default function ScreeningPage() {
               </div>
               <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)" }}>
                 Skor ASRS: {asrsResult?.totalScore ?? 0}/24 · Interupsi tab: {tabDistractionCount}x
+              </div>
+            </div>
+
+            {/* ML Prediction Card */}
+            {analysis?.ml_prediction && analysisMode === "clinical" && (
+              <div className="result-card" style={{ borderColor: "var(--accent-teal)" }}>
+                <div>
+                  <div className="result-card-title">Klasifikasi ML (Logistic Regression)</div>
+                  <div className="result-card-value" style={{ color: analysis.ml_prediction.classification === "adhd" ? "var(--coral-danger)" : "var(--accent-teal)" }}>
+                    {analysis.ml_prediction.classification === "adhd" ? "Risk Profile: ADHD-pattern" : "Pattern: Neurotypical"}
+                  </div>
+                  <div className="result-card-desc">
+                    Probabilitas distribusi ADHD: {(analysis.ml_prediction.adhd_probability * 100).toFixed(0)}% · Confidence: {(analysis.ml_prediction.confidence * 100).toFixed(0)}%
+                  </div>
+                </div>
+                <div style={{ marginTop: "16px", fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  Model: {analysis.ml_prediction.model_version} · Akurasi training: {(analysis.ml_prediction.accuracy * 100).toFixed(0)}%
+                </div>
+              </div>
+            )}
+
+            {/* Ex-Gaussian + GDI Info Card */}
+            <div className="result-card">
+              <div>
+                <div className="result-card-title">
+                  {analysisMode === "layperson" ? "Stamina & kontrol impuls terukur" : "Ex-Gaussian decomposition & Gaze Dispersion"}
+                </div>
+                <div className="result-card-desc" style={{ fontSize: "0.78rem", lineHeight: 1.6 }}>
+                  {metrics.exGaussian.tau !== null && (
+                    <>
+                      <strong>Tau (impulsivitas):</strong> {metrics.exGaussian.tau} ms ·{' '}
+                      <strong>Mu (pemrosesan):</strong> {metrics.exGaussian.mu} ms ·{' '}
+                      <strong>Sigma (variabilitas):</strong> {metrics.exGaussian.sigma} ms
+                      <br />
+                    </>
+                  )}
+                  {gdiSummary.meanGdi !== null ? (
+                    <>
+                      <strong>GDI rata-rata:</strong> {gdiSummary.meanGdi.toFixed(3)} satuan layar ({gdiSummary.trialsWithData} trial terukur) · Max: {gdiSummary.maxGdi?.toFixed(3)}
+                    </>
+                  ) : (
+                    "Data tatapan mata tidak tersedia — sensor okulomotorik dilewati atau coverage rendah."
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: "12px", fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                {metrics.exGaussian.tau !== null && metrics.exGaussian.tau > 35
+                  ? "Tau tinggi mengindikasikan right-skew pada distribusi waktu reaksi — pola khas impulsivitas motorik."
+                  : metrics.exGaussian.tau !== null
+                  ? "Tau dalam rentang normal — distribusi waktu reaksi cenderung simetris."
+                  : ""}
+                {gdiSummary.meanGdi !== null && gdiSummary.meanGdi > 0.08
+                  ? " GDI tinggi menunjukkan dispersi tatapan luas dari target — kemungkinan mind-wandering saat tugas."
+                  : gdiSummary.meanGdi !== null
+                  ? " GDI rendah menunjukkan fiksasi stabil pada area target."
+                  : ""}
               </div>
             </div>
           </div>

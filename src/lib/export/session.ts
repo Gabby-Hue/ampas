@@ -41,6 +41,14 @@ export type SessionExport = {
     data_coverage: number;
     relative_dispersion: number;
     out_of_bounds_rate?: number;
+    mean_gdi?: number | null;
+    max_gdi?: number | null;
+    trials_with_gaze_data?: number;
+  };
+  ex_gaussian?: {
+    mu_ms?: number | null;
+    sigma_ms?: number | null;
+    tau_ms?: number | null;
   };
 };
 
@@ -56,6 +64,7 @@ export function buildSessionExport(
     durationSeconds?: number;
     tabInterruptions?: number;
     outOfBoundsRate?: number;
+    gdiSummary?: { meanGdi: number | null; maxGdi: number | null; trialsWithData: number };
   }
 ): SessionExport {
   const testMode = isDemo ? "synthetic" : (extras?.subjectContext?.testMode ?? "clinical");
@@ -105,6 +114,16 @@ export function buildSessionExport(
       data_coverage: isDemo ? 0 : gaze.coverage,
       relative_dispersion: isDemo ? 0 : gaze.relativeDispersion,
       ...(isDemo || extras?.outOfBoundsRate === undefined ? {} : { out_of_bounds_rate: extras.outOfBoundsRate }),
+      ...(extras?.gdiSummary ? {
+        mean_gdi: extras.gdiSummary.meanGdi,
+        max_gdi: extras.gdiSummary.maxGdi,
+        trials_with_gaze_data: extras.gdiSummary.trialsWithData,
+      } : {}),
     },
+    ex_gaussian: metrics.exGaussian && metrics.exGaussian.tau !== null ? {
+      mu_ms: metrics.exGaussian.mu ?? null,
+      sigma_ms: metrics.exGaussian.sigma ?? null,
+      tau_ms: metrics.exGaussian.tau ?? null,
+    } : undefined,
   };
 }
