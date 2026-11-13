@@ -5,7 +5,7 @@
 > **Target Kompetisi:** LOGICODIX 2026 (HIMTI UNESA)  
 > **Posisi Produk:** Web-Based Attention Performance Screening & Early Referral Aid (Termometer Atensi Digital, Bukan Alat Diagnosis Klinis / DSM-5 Mandiri).
 
-OculiCare NeuroFocus adalah aplikasi web penapisan awal performa perhatian neurobehavioral yang menggabungkan **Continuous Performance Task (CPT) Go/No-Go** terstandar dengan pelacakan fiksasi tatapan mata berbasis kamera lokal (MediaPipe WASM on-device) serta integrasi kuesioner baku **WHO ASRS v1.1 Part A**.
+OculiCare NeuroFocus adalah aplikasi web penapisan awal performa perhatian neurobehavioral yang menggabungkan **Continuous Performance Task (CPT) Go/No-Go** terstandar, **Trailing Eyes smooth-pursuit** untuk kelancaran okulomotor, dan pelacakan fiksasi tatapan mata berbasis kamera lokal (MediaPipe WASM on-device), serta integrasi kuesioner baku **WHO ASRS v1.1 Part A**.
 
 ---
 
@@ -17,7 +17,7 @@ OculiCare NeuroFocus adalah aplikasi web penapisan awal performa perhatian neuro
 - **Bahaya Self-Diagnosis Liar:** Meningkatnya tren diagnosis mandiri di media sosial tanpa basis data objektif.
 
 ### Solusi OculiCare
-- **Skrining Triangulasi Objektif:** Menggabungkan konfirmasi keluhan kronis 6 bulan (WHO ASRS v1.1, 6 item) dengan pengujian performa motorik aktual (CPT Go/No-Go 60 detik) dan kestabilan okulomotor.
+- **Skrining Triangulasi Objektif:** Menggabungkan konfirmasi keluhan kronis 6 bulan (WHO ASRS v1.1, 6 item), pengujian performa motorik aktual (CPT Go/No-Go), dan kestabilan okulomotor (Trailing Eyes smooth-pursuit 10 detik).
 - **Dual-Tone Copywriting:** Menyajikan 2 sudut pandang hasil secara terpisah:
   1. *Versi Pengguna (Awam & Bersahabat):* Menjelaskan stamina fokus, gaya distraksi (melamun vs terburu-buru), dan 3 langkah kebiasaan harian praktis.
   2. *Versi Lembar Rujukan (Medis Formal):* Format dokumen klinis satu halaman A4 yang siap dibawa saat berkonsultasi dengan dokter/psikolog.
@@ -28,15 +28,16 @@ OculiCare NeuroFocus adalah aplikasi web penapisan awal performa perhatian neuro
 ## 2. Fitur MVP yang Berfungsi
 
 1. **WHO ASRS v1.1 Part A Screener:** 6 pertanyaan baku WHO untuk memvalidasi keluhan inatensi dan impulsivitas dalam 6 bulan terakhir.
-2. **Deterministic CPT Go/No-Go Engine:** Siklus psikometri baku (stimulus aktif 250 ms flash dilanjutkan fiksasi netral `+` selama sisa jeda 1000–2200 ms).
-3. **On-Device Eye Tracking (MediaPipe WASM):** Estimasi kestabilan tatapan mata relatif tanpa mengunggah data kamera ke server. Berjalan 100% offline dari aset `/public/mediapipe/`.
-4. **Adaptive Pad / Touch Viewport:** Layout bebas scroll (`100dvh`) yang ergonomis untuk tablet/pad dengan tombol *Dual-Thumb Touchpad* besar.
-5. **3-Card Pillar Results Dashboard:** Kartu Stamina Fokus, Kartu Gaya Distraksi, dan Kartu Korelasi Gejala Kronis.
-6. **Attention Fatigue Curve:** Visualisasi ketahanan atensi per 10 detik (Blok 1 s.d. 6).
-7. **Clinical Gaze Plot:** Visualisasi dispersi fiksasi tatapan mata (aktif pada uji kamera riil maupun simulasi sintetis).
-8. **One-Click Clinical Referral PDF Export:** Format cetak A4 1 halaman presisi untuk rujukan medis.
-9. **Dual-Profile Synthetic Benchmark:** Pilihan profil *Stable* dan *Variable* berlabel data sintetis untuk keperluan live demo panggung yang bebas risiko pencahayaan.
-10. **Medical Intelligence & Fallback:** Integrasi Gemini 1.5 Flash API dengan *strict JSON schema validation* serta fallback deterministik lokal `local-dual-tone-guardrail-v2`.
+2. **Deterministic CPT Go/No-Go Engine:** Siklus psikometri baku dengan mode durasi 60 detik (demo cepat) dan 5 menit (standar klinis), stimulus aktif 250–550 ms, lalu fiksasi netral `+`.
+3. **Trailing Eyes Smooth Pursuit:** Tahap penelusuran target sinusoidal 10 detik yang mengukur akurasi lintasan, deviasi RMS, dan saccadic intrusions.
+4. **On-Device Eye Tracking (MediaPipe WASM):** Estimasi kestabilan tatapan mata relatif tanpa mengunggah data kamera ke server. Berjalan 100% offline dari aset `/public/mediapipe/`.
+5. **Adaptive Pad / Touch Viewport:** Layout bebas scroll (`100dvh`) yang ergonomis untuk tablet/pad dengan tombol *Dual-Thumb Touchpad* besar.
+6. **3-Card Pillar Results Dashboard:** Kartu Stamina Fokus, Kartu Gaya Distraksi, dan Kartu Korelasi Gejala Kronis.
+7. **Attention Fatigue Curve:** Visualisasi ketahanan atensi per blok (Blok 1 s.d. 6 pada mode klinis).
+8. **Radar Gaze Heatmap:** Peta termal foveal/parafoveal, scatter vektor sampel, dan GDI untuk membaca dispersi fiksasi (aktif pada kamera riil maupun simulasi sintetis).
+9. **One-Click Clinical Referral PDF Export:** Format cetak A4 1 halaman presisi untuk rujukan medis.
+10. **Dual-Profile Synthetic Benchmark:** Pilihan profil *Stable* dan *Variable* berlabel data sintetis untuk keperluan live demo panggung yang bebas risiko pencahayaan.
+11. **Medical Intelligence & Fallback:** Integrasi Gemini 1.5 Flash API dengan *strict JSON schema validation* serta fallback deterministik lokal `local-dual-tone-guardrail-v2`.
 
 ---
 
@@ -49,7 +50,7 @@ OculiCare NeuroFocus adalah aplikasi web penapisan awal performa perhatian neuro
 | **Client Vision** | MediaPipe Tasks Vision (WASM offline) | Ekstraksi landmark wajah & iris on-device tanpa ketergantungan CDN cloud. |
 | **Medical Intelligence**| Google Gemini 1.5 Flash API | Inferensi cepat dengan validasi skema JSON terstruktur tanpa overclaim medis. |
 | **Deterministic Engine** | Pure TypeScript (`/src/lib/cpt`) | Seeded random number generator, zero floating-point drift, 100% reproducible. |
-| **Testing** | Node.js Test Runner (`node --test`) | Cepat, native tanpa overhead dependensi eksternal, 14 test cases lolos. |
+| **Testing** | Node.js Test Runner (`node --test`) | Cepat, native tanpa overhead dependensi eksternal, 25 test cases lolos. |
 
 ---
 
@@ -76,8 +77,8 @@ Buka peramban di `http://localhost:3000`.
 
 ### Script Tersedia
 - `npm run dev` : Menjalankan development server lokal (`localhost:3000`).
-- `npm run lint` : Memeriksa standar kode dengan ESLint (`0 errors, 0 warnings`).
-- `npm test` : Menjalankan 14 unit test untuk scoring ASRS, CPT engine, gaze quality gate, dan session export.
+- `npm run lint` : Memeriksa standar kode dengan ESLint (`0 errors`).
+- `npm test` : Menjalankan 25 unit test untuk scoring ASRS, CPT engine, gaze quality gate, trailing eyes, autentikasi, riwayat, dan session export.
 - `npm run build` : Mengompilasi aplikasi ke versi produksi.
 - `npm run start` : Menjalankan server produksi lokal.
 
@@ -113,7 +114,7 @@ Aplikasi dilengkapi dengan fallback deterministik lokal 100% sehingga tetap berf
 - **Kuesioner ASRS v1.1:** World Health Organization (WHO) Adult ADHD Self-Report Scale v1.1 Screener (Kessler et al., 2005, 2007).
 - **Paradigma CPT:** Conners Continuous Performance Test 3 (Conners, 2014) & Test of Variables of Attention (T.O.V.A.).
 - **Komputasi Vision:** Google MediaPipe Tasks Vision (`@mediapipe/tasks-vision`).
-- **Font & Ikon:** Geist Font Family (Vercel) & SVG UI Icons.
+- **Font & Ikon:** Figtree & Noto Sans (Google Fonts) serta SVG UI Icons.
 
 ---
 
@@ -125,3 +126,12 @@ Seluruh berkas perencanaan arsitektur, panduan pitching panggung, dan daftar pen
 - `docs/DEMO_CARD.md` : Kartu saku ringkasan alur pitching dan mitigasi darurat panggung.
 - `docs/QA_CHECKLIST.md` : Checklist verifikasi mutu sebelum pengumpulan dan presentasi.
 - `docs/WHY_REVISI.md` : Rasionalisasi ilmiah perombakan dari PRD v1 ke PRD v2.
+
+---
+
+## 9. Checklist Submission LOGICODIX 2026
+
+- **Source code:** repository GitHub `https://github.com/neixcyll/OculiCare-NeuroFocus` (branch `neil`), berisi MVP yang dapat dijalankan.
+- **Video demo:** durasi 3–5 menit, menampilkan fitur aplikasi secara langsung termasuk integrasi AI, tanpa suara presentasi/narasi peserta.
+- **Local demo:** jalankan `npm install` lalu `npm run dev`; aset MediaPipe dan model deteksi wajah tersedia lokal di `public/mediapipe/` sehingga demo tetap berjalan tanpa internet.
+- **Batas submission:** tidak ada perubahan source code setelah batas waktu pengumpulan; versi yang dinilai adalah commit terakhir sebelum tenggat.

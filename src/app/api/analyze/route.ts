@@ -50,6 +50,12 @@ type AnalyzePayload = {
     max_gdi?: number;
     trials_with_gaze_data?: number;
   };
+  trailing?: {
+    accuracy_percent?: number;
+    mean_deviation?: number;
+    intrusive_saccades?: number;
+    status?: string;
+  };
   ex_gaussian?: {
     mu_ms?: number | null;
     sigma_ms?: number | null;
@@ -206,10 +212,15 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
       ? `Gaze Dispersion Index (rata-rata ${meanGdi.toFixed(3)} satuan layar) pada ${trialsWithGaze} trial dengan data tatapan.`
       : "";
 
+  const trailingNote = payload.trailing?.status
+    ? ` Uji penelusuran visual Trailing Eyes (smooth pursuit): akurasi ${payload.trailing.accuracy_percent ?? 0}%, deviasi RMS ${payload.trailing.mean_deviation ?? 0}, saccadic intrusions ${payload.trailing.intrusive_saccades ?? 0} kali (${payload.trailing.status}).`
+    : "";
+
   const gazeNote =
-    payload.gaze?.status === "usable"
+    (payload.gaze?.status === "usable"
       ? `Pelacakan fiksasi MediaPipe On-Device mencatat coverage ${Math.round((payload.gaze.data_coverage ?? 0) * 100)}%, dispersi relatif ${payload.gaze.relative_dispersion?.toFixed(3) ?? "0"}, dan out-of-bounds rate ${Math.round((payload.gaze.out_of_bounds_rate ?? 0) * 100)}%.${gdiInterpretation}`
-      : "Sensor okulomotorik tidak aktif atau coverage berada di bawah ambang kualitas; interpretasi difokuskan pada psikometri motorik CPT.";
+      : "Sensor okulomotorik tidak aktif atau coverage berada di bawah ambang kualitas; interpretasi difokuskan pada psikometri motorik CPT.") +
+    trailingNote;
 
   const recs: string[] = [
     "Lakukan evaluasi diagnostik komprehensif (wawancara klinis terstruktur & Conners CPT 3 / T.O.V.A.) bila keluhan menimbulkan hendaya fungsional menetap.",

@@ -29,7 +29,7 @@ import {
 import { useGazeTracking } from "@/lib/gaze/tracking";
 import type { GazeSample } from "@/lib/gaze/quality";
 import { buildSessionExport } from "@/lib/export/session";
-import { calculateTrialGdis, summarizeGdiResults, type CptMetrics, type ClinicalStats } from "@/lib/cpt/engine";
+import { calculateTrialGdis, summarizeGdiResults } from "@/lib/cpt/engine";
 
 type Phase = "questionnaire" | "ready" | "running" | "results";
 type Trial = CptEvent;
@@ -112,7 +112,7 @@ export default function ScreeningPage() {
   const [testMode] = useState<TestMode>("clinical");
 
   // Tier 2 Pre-flight Integrity & Environmental Protocol
-  const [consent, setConsent] = useState(false);
+  const [consent] = useState(false);
   const [skipCamera, setSkipCamera] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [isTestPaused, setIsTestPaused] = useState(false);
@@ -123,9 +123,13 @@ export default function ScreeningPage() {
 
   // Guided Timed Practice (6 real 250ms flash trials)
   const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceStimulusVisible, setPracticeStimulusVisible] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [practiceScore, setPracticeScore] = useState(0);
   const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
   const practiceCorrectRef = useRef(0);
@@ -274,6 +278,19 @@ export default function ScreeningPage() {
     }
   }, [isTestPaused, phase, clearTimers]);
 
+  // Compute per-trial GDI from gaze samples and trial events
+  const allGazeSamples = useMemo(() => {
+    // Build flat array of all recorded samples from the tracking hook
+    return (gaze.trace as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>) ?? [];
+  }, [gaze.trace]);
+
+  const trialGdis = useMemo(
+    () => calculateTrialGdis(trials, allGazeSamples),
+    [trials, allGazeSamples]
+  );
+  const gdiSummary = useMemo(() => summarizeGdiResults(trialGdis), [trialGdis]);
+
+
   const requestAnalysisWith = useCallback(
     async (
       targetEvents: Trial[],
@@ -352,7 +369,7 @@ export default function ScreeningPage() {
         setAnalysisLoading(false);
       }
     },
-    [subjectContext, gaze.quality, gaze.outOfBoundsRate]
+    [subjectContext, gaze.quality, gaze.outOfBoundsRate, gdiSummary]
   );
 
   const endSession = useCallback(() => {
@@ -420,6 +437,7 @@ export default function ScreeningPage() {
     subjectContext,
     tabDistractionCount,
     requestAnalysisWith,
+    gdiSummary,
   ]);
 
   useEffect(() => {
@@ -546,17 +564,6 @@ export default function ScreeningPage() {
     runPracticeStepRef.current = runPracticeStep;
   });
 
-  const startGuidedPractice = () => {
-    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
-    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
-    practiceCorrectRef.current = 0;
-    practiceActiveRef.current = null;
-    setPracticeScore(0);
-    setPracticeState("running");
-    setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
-    practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
-  };
-
   const handlePracticeRespond = useCallback(() => {
     if (practiceState !== "running") return;
     const active = practiceActiveRef.current;
@@ -669,21 +676,6 @@ export default function ScreeningPage() {
   const clinicalStats = useMemo(() => calculateClinicalStats(trials), [trials]);
   const attentionBlocks = useMemo(() => calculateAttentionBlocks(trials), [trials]);
 
-  // Compute per-trial GDI from gaze samples and trial events
-  const allGazeSamples = useMemo(() => {
-    // Build flat array of all recorded samples from the tracking hook
-    return (gaze.trace as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>) ?? [];
-  }, [gaze.trace]);
-
-  const trialGdis = useMemo(
-    () => calculateTrialGdis(trials, allGazeSamples),
-    [trials, allGazeSamples]
-  );
-  const gdiSummary = useMemo(() => summarizeGdiResults(trialGdis), [trialGdis]);
-
-  const currentBlockNumber = (trial?.blockIndex ?? 0) + 1;
-  const totalBlocksCount = subjectContext.testMode === "clinical" ? 6 : 3;
-
   const printSummary = () => window.print();
 
   const downloadJson = () => {
@@ -702,20 +694,6 @@ export default function ScreeningPage() {
     anchor.download = `${exportPayload.session_id.toLowerCase()}.json`;
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
-
-  const proceedToSesi1 = async () => {
-    if (fullscreenSupported && !document.fullscreenElement) {
-      try {
-        await document.documentElement.requestFullscreen();
-        setFullscreenError("");
-      } catch {
-        setFullscreenError("Layar penuh ditolak peramban. Izinkan mode layar penuh untuk memulai tes.");
-        return;
-      }
-    }
-    setAsrsStep(0);
-    setPhase("questionnaire");
   };
 
   const resumeTest = async () => {
@@ -740,11 +718,6 @@ export default function ScreeningPage() {
 
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
   const currentAsrsAnswered = asrsAnswers[currentAsrsQuestion.id] !== undefined;
-  const cameraReady = skipCamera || cameraStatus === "ready";
-  const fullscreenReady = !fullscreenSupported || isFullscreen;
-  const practicePassed = practiceState === "passed";
-  const gateReady = consent && cameraReady && practicePassed && fullscreenReady;
-
   return (
     <main className={`site-shell screening-shell ${phase === "ready" || phase === "running" ? "exam-mode-hide-nav" : ""}`}>
       {(phase !== "ready" && phase !== "running") && (

@@ -1878,6 +1878,100 @@ h1 {
 .btn-no-print { }
 
 /* ------------------------------------------------------------------
+   Screening: trailing eyes smooth pursuit
+------------------------------------------------------------------- */
+
+.trailing-canvas {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 68px);
+  padding: clamp(72px, 10vh, 120px) var(--gutter) clamp(96px, 12vh, 140px);
+  background:
+    radial-gradient(circle at 50% 50%, #ffffff 0%, #f6faf8 58%, #e4f4ec 100%);
+  overflow: hidden;
+}
+
+.trailing-topbar {
+  position: absolute;
+  top: 22px;
+  left: var(--gutter);
+  right: var(--gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.trailing-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.trailing-timer {
+  font-family: var(--font-display);
+  font-size: 1.7rem;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.trailing-rail {
+  position: absolute;
+  top: 50%;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.trailing-target {
+  position: absolute;
+  width: clamp(38px, 6vw, 52px);
+  height: clamp(38px, 6vw, 52px);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 32%, #8fe3bc 0%, #0b7a53 58%, #075e40 100%);
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 10%, transparent), 0 14px 34px rgba(11, 122, 83, 0.24);
+}
+
+.trailing-target::after {
+  content: "";
+  position: absolute;
+  inset: 36%;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.trailing-hint {
+  position: absolute;
+  bottom: clamp(92px, 13vh, 132px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90vw, 620px);
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.trailing-canvas > .secondary-button {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------
    Responsive
 ------------------------------------------------------------------- */
 

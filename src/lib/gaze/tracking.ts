@@ -96,6 +96,7 @@ export function useGazeTracking(
   const [quality, setQuality] = useState<GazeQuality>(INITIAL_QUALITY);
   const [outOfBoundsRate, setOutOfBoundsRate] = useState(0);
   const [trace, setTrace] = useState<GazeSample[]>([]);
+  const [latestSample, setLatestSample] = useState<GazeSample | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "tracking" | "unavailable">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [calibration, setCalibration] = useState<GazeCalibration | null>(null);
@@ -238,6 +239,7 @@ export function useGazeTracking(
 
               const rawSample = estimateRelativeIrisPosition(landmarks);
               latestRawSampleRef.current = rawSample;
+              setLatestSample(rawSample);
 
               if (recordSamplesRef.current) {
                 const calibrated = applyGazeCalibration(rawSample, calibrationRef.current);
@@ -249,6 +251,7 @@ export function useGazeTracking(
                 setTrace(samplesRef.current.slice(-72));
               }
             } catch {
+              setLatestSample({ x: 0, y: 0, valid: false });
               if (recordSamplesRef.current) {
                 samplesRef.current.push({ x: 0, y: 0, valid: false });
                 setQuality(calculateGazeQuality(samplesRef.current));
@@ -282,6 +285,7 @@ export function useGazeTracking(
     setQuality(INITIAL_QUALITY);
     setOutOfBoundsRate(0);
     setTrace([]);
+    setLatestSample(null);
   }, []);
 
   const getLatestRawSample = useCallback(() => latestRawSampleRef.current, []);
@@ -296,6 +300,7 @@ export function useGazeTracking(
     calibration,
     setCalibration,
     getLatestRawSample,
+    latestSample,
     reset,
   };
 }

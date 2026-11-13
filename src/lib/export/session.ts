@@ -45,6 +45,12 @@ export type SessionExport = {
     max_gdi?: number | null;
     trials_with_gaze_data?: number;
   };
+  trailing?: {
+    accuracy_percent: number;
+    mean_deviation: number;
+    intrusive_saccades: number;
+    status: string;
+  };
   ex_gaussian?: {
     mu_ms?: number | null;
     sigma_ms?: number | null;
@@ -65,6 +71,12 @@ export function buildSessionExport(
     tabInterruptions?: number;
     outOfBoundsRate?: number;
     gdiSummary?: { meanGdi: number | null; maxGdi: number | null; trialsWithData: number };
+    trailing?: {
+      accuracy_percent: number;
+      mean_deviation: number;
+      intrusive_saccades: number;
+      status: string;
+    };
   }
 ): SessionExport {
   const testMode = isDemo ? "synthetic" : (extras?.subjectContext?.testMode ?? "clinical");
@@ -120,6 +132,7 @@ export function buildSessionExport(
         trials_with_gaze_data: extras.gdiSummary.trialsWithData,
       } : {}),
     },
+    trailing: isDemo ? undefined : extras?.trailing,
     ex_gaussian: metrics.exGaussian && metrics.exGaussian.tau !== null ? {
       mu_ms: metrics.exGaussian.mu ?? null,
       sigma_ms: metrics.exGaussian.sigma ?? null,
