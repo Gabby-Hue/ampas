@@ -128,7 +128,8 @@ export default function ScreeningPage() {
   const [practiceRt, setPracticeRt] = useState<number | null>(null);
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
   const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
-  const [practiceResponded, setPracticeResponded] = useState(false);
+  const [practiceTrialVisible, setPracticeTrialVisible] = useState(false);
+  const [practiceStepIndex, setPracticeStepIndex] = useState(0);
   const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
   const practiceCorrectRef = useRef(0);
   const practiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -542,12 +543,14 @@ export default function ScreeningPage() {
 
     const step = PRACTICE_SEQUENCE[idx];
     practiceActiveRef.current = { kind: step.kind, shownAt: performance.now(), responded: false };
+    setPracticeStepIndex(idx);
     setPracticeKind(step.kind);
-    setPracticeResponded(false);
+
     setPracticeRt(null);
+    setPracticeTrialVisible(true);
     setPracticeFeedback(step.kind === "go" ? "HIJAU: Tekan SPACE / Tombol sekarang!" : "MERAH: Tahan, jangan tekan!");
 
-    practiceFlashRef.current = setTimeout(() => {}, 250);
+    practiceFlashRef.current = setTimeout(() => setPracticeTrialVisible(false), 250);
 
     practiceTimerRef.current = setTimeout(() => {
       const active = practiceActiveRef.current;
@@ -572,8 +575,12 @@ export default function ScreeningPage() {
     if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
     practiceCorrectRef.current = 0;
     practiceActiveRef.current = null;
+    setPracticeStepIndex(0);
     setPracticeScore(0);
     setPracticeRt(null);
+    setPracticeKind(null);
+
+    setPracticeTrialVisible(false);
     setPracticeState("running");
     setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
     practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
@@ -929,85 +936,102 @@ export default function ScreeningPage() {
 
             {/* Practice section */}
             <div style={{ marginTop: "24px", borderTop: "1px solid var(--surface-border)", paddingTop: "20px" }}>
-              <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 12px", lineHeight: 1.6 }}>
-                Latihan singkat — tekan SPASI saat <strong style={{ color: "var(--accent)" }}>lingkaran hijau</strong> muncul, tahan saat <strong style={{ color: "#b42318" }}>kotak merah</strong>. Stimulus persis seperti tes utama.
-              </p>
-
-              {/* Live practice stimulus preview (mirrors real CPT shapes) */}
-              {practiceState === "running" && practiceKind && (
-                <div style={{ display: "flex", justifyContent: "center", marginBottom: "14px", height: 80, alignItems: "center" }}>
-                  <div
-                    className={`stimulus-shape ${practiceKind === "no-go" ? "shape-stop" : ""}`}
-                    style={{ width: 64, height: 64 }}
-                  />
-                </div>
-              )}
-
-              {/* Countdown overlay before CPT starts */}
-              {countdownNum !== null && (
-                <div style={{ fontSize: "3rem", fontWeight: 800, color: "var(--accent)", margin: "16px 0", fontFamily: "var(--font-display)" }}>
-                  {countdownNum}
-                </div>
-              )}
-
-              {practiceState === "running" && (
-                <div style={{ marginBottom: "14px" }}>
-                  <p style={{ fontSize: "0.92rem", fontWeight: 600, color: "var(--accent)", margin: "0 0 4px" }}>
-                    {practiceFeedback}
+              {practiceState === "idle" && (
+                <div>
+                  <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", margin: "0 0 6px", fontWeight: 500 }}>
+                    Simulasi latihan — 6 stimulus persis seperti tes utama
                   </p>
-                  <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: 0 }}>
-                    Skor: {practiceScore}/{PRACTICE_SEQUENCE.length}
-                    {practiceRt !== null && ` · ${practiceRt} ms`}
+                  <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.5 }}>
+                    Lingkaran <span style={{ color: "var(--accent)", fontWeight: 600 }}>hijau</span> = tekan SPASI&ensp;·&ensp;
+                    Kotak <span style={{ color: "#b42318", fontWeight: 600 }}>merah</span> = tahan tangan
                   </p>
-                  {/* Progress bar */}
-                  <div style={{ marginTop: "8px", height: 4, background: "var(--surface-border)", borderRadius: 2, overflow: "hidden" }}>
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${Math.round((practiceScore + (practiceResponded && practiceKind === "go" ? 1 : 0)) / PRACTICE_SEQUENCE.length * 100)}%`,
-                        background: "var(--accent)",
-                        borderRadius: 2,
-                        transition: "width 0.3s ease",
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-              {practiceState === "passed" && (
-                <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 14px", fontWeight: 600 }}>
-                  ✓ {practiceFeedback}
-                </p>
-              )}
-              {practiceState === "retry" && (
-                <p style={{ fontSize: "0.88rem", color: "var(--warning)", margin: "0 0 14px" }}>
-                  {practiceFeedback}
-                </p>
-              )}
-              <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
-                {(practiceState === "idle" || practiceState === "retry") && (
-                  <button
-                    type="button"
-                    className="primary-button"
-                    onClick={startGuidedPractice}
-                  >
+                  <button type="button" className="primary-button" onClick={startGuidedPractice}>
                     Mulai Latihan
                   </button>
-                )}
-                {practiceState === "running" && (
-                  <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                    Menunggu respons…
-                  </span>
-                )}
-                {(practiceState === "idle" || practiceState === "passed" || practiceState === "retry") && (
+                </div>
+              )}
+              {practiceState === "running" && (
+                <p style={{ fontSize: "0.82rem", color: "var(--accent)", margin: 0 }}>
+                  ◉ Latihan berjalan — lihat layar penuh di atas
+                </p>
+              )}
+              {practiceState === "passed" && (
+                <div>
+                  <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 10px", fontWeight: 600 }}>
+                    ✓ {practiceFeedback}
+                  </p>
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
                   >
-                    Lewati Latihan → Mulai Tes
+                    Lanjut ke Tes Utama →
                   </button>
-                )}
-              </div>
+                </div>
+              )}
+              {practiceState === "retry" && (
+                <div>
+                  <p style={{ fontSize: "0.88rem", color: "var(--warning)", margin: "0 0 12px" }}>
+                    {practiceFeedback}
+                  </p>
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                    <button type="button" className="primary-button" onClick={startGuidedPractice}>
+                      Ulangi Latihan
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
+                    >
+                      Tetap lanjut →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* PRACTICE CANVAS — full-screen mirror of the real CPT test */}
+      {practiceState === "running" && (
+        <section className="pure-cpt-canvas exam-white" aria-live="polite" role="presentation">
+          <div className="cpt-crosshair" />
+          <div className="clinical-stimulus">
+            {practiceTrialVisible && practiceKind && (
+              <div className={`stimulus-shape ${practiceKind === "no-go" ? "shape-stop" : ""}`} />
+            )}
+          </div>
+
+          {/* Practice HUD — subtly overlaid at bottom */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: "14px 24px 18px",
+              background: "linear-gradient(to top, rgba(255,255,255,0.97) 60%, transparent)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              pointerEvents: "none",
+            }}
+          >
+            <div style={{ pointerEvents: "auto" }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 2px" }}>
+                Latihan · Trial {practiceStepIndex + 1} / {PRACTICE_SEQUENCE.length}
+              </p>
+              <p style={{ fontSize: "0.72rem", color: "var(--text-secondary)", margin: 0 }}>
+                {practiceFeedback}
+                {practiceRt !== null && `&ensp;·&ensp;${practiceRt} ms`}
+              </p>
+            </div>
+            <div style={{ textAlign: "right", pointerEvents: "auto" }}>
+              <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", margin: "0 0 2px" }}>Skor</p>
+              <p style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--accent)", margin: 0, lineHeight: 1 }}>
+                {practiceScore}<span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 400 }}>/{PRACTICE_SEQUENCE.length}</span>
+              </p>
             </div>
           </div>
         </section>
