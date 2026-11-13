@@ -61,13 +61,14 @@ type ApiAnalysis = {
   };
 };
 
+// Practice mirrors real CPT: 250ms flash, random ISI 1000–2000ms between trials
 const PRACTICE_SEQUENCE: Array<{ kind: "go" | "no-go"; delayMs: number }> = [
-  { kind: "go", delayMs: 1200 },
-  { kind: "go", delayMs: 1300 },
-  { kind: "no-go", delayMs: 1400 },
-  { kind: "go", delayMs: 1200 },
-  { kind: "no-go", delayMs: 1400 },
-  { kind: "go", delayMs: 1200 },
+  { kind: "go",     delayMs: 1450 },
+  { kind: "no-go",  delayMs: 1800 },
+  { kind: "go",     delayMs: 1200 },
+  { kind: "go",     delayMs: 1650 },
+  { kind: "no-go",  delayMs: 1900 },
+  { kind: "go",     delayMs: 1350 },
 ];
 
 const DEMO_STABLE_TRACE: GazeSample[] = Array.from({ length: 64 }, (_, i) => ({
@@ -109,7 +110,7 @@ export default function ScreeningPage() {
   const [sleepHours] = useState<SleepDuration>("6-8");
   const [caffeineRecent] = useState<boolean>(false);
   const [screenTimeHours] = useState<ScreenExposure>("2-5");
-  const [testMode] = useState<TestMode>("clinical");
+  const [testMode, setTestMode] = useState<TestMode>("quick");
 
   // Tier 2 Pre-flight Integrity & Environmental Protocol
   const [skipCamera, setSkipCamera] = useState(false);
@@ -124,6 +125,10 @@ export default function ScreeningPage() {
   const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
   const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
   const [practiceScore, setPracticeScore] = useState(0);
+  const [practiceRt, setPracticeRt] = useState<number | null>(null);
+  const [countdownNum, setCountdownNum] = useState<number | null>(null);
+  const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
+  const [practiceResponded, setPracticeResponded] = useState(false);
   const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
   const practiceCorrectRef = useRef(0);
   const practiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,7 +157,11 @@ export default function ScreeningPage() {
   const plannedTrials = useRef<CptTrial[]>(createStructuredCptTrials("clinical"));
 
   // Record gaze samples ONLY during active running phase when not paused
-  const gaze = useGazeTracking(videoRef, cameraStatus === "ready", phase === "running" && !isTestPaused);
+  const gaze = useGazeTracking(
+    videoRef,
+    cameraStatus === "ready",
+    (phase === "running" || (phase === "ready" && practiceState === "running")) && !isTestPaused
+  );
 
   const trialIndex = useRef(0);
   const startedAt = useRef(0);
@@ -533,6 +542,9 @@ export default function ScreeningPage() {
 
     const step = PRACTICE_SEQUENCE[idx];
     practiceActiveRef.current = { kind: step.kind, shownAt: performance.now(), responded: false };
+    setPracticeKind(step.kind);
+    setPracticeResponded(false);
+    setPracticeRt(null);
     setPracticeFeedback(step.kind === "go" ? "HIJAU: Tekan SPACE / Tombol sekarang!" : "MERAH: Tahan, jangan tekan!");
 
     practiceFlashRef.current = setTimeout(() => {}, 250);
@@ -561,6 +573,7 @@ export default function ScreeningPage() {
     practiceCorrectRef.current = 0;
     practiceActiveRef.current = null;
     setPracticeScore(0);
+    setPracticeRt(null);
     setPracticeState("running");
     setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
     practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
@@ -572,11 +585,15 @@ export default function ScreeningPage() {
     if (!active || active.responded) return;
     active.responded = true;
     const rt = Math.round(performance.now() - active.shownAt);
+    setPracticeRt(rt);
     if (active.kind === "go") {
       practiceCorrectRef.current += 1;
-      setPracticeFeedback(`Tepat! (${rt} ms)`);
+      if (rt < 200) setPracticeFeedback(`Cepat sekali! (${rt} ms)`);
+      else if (rt > 600) setPracticeFeedback(`Terlambat... (${rt} ms)`);
+      else setPracticeFeedback(`Tepat! (${rt} ms)`);
     } else {
-      setPracticeFeedback("Salah tekan! Lingkaran merah harus ditahan.");
+      practiceCorrectRef.current -= 1;
+      setPracticeFeedback("Komisi! Tahan saat merah.");
     }
   }, [practiceState]);
 
@@ -669,12 +686,27 @@ export default function ScreeningPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [respond, phase, practiceState]);
 
-  // Auto-transition to CPT once practice is passed
+  // Countdown 3-2-1 then auto-start CPT after practice passes
   useEffect(() => {
-    if (phase === "ready" && practiceState === "passed") {
-      startTestRef.current();
-    }
-  }, [phase, practiceState]);
+    if (phase !== "ready" || practiceState !== "passed" || countdownNum !== null) return;
+    let tick = 3;
+    setCountdownNum(tick);
+    const id = setInterval(() => {
+      tick -= 1;
+      if (tick <= 0) {
+        clearInterval(id);
+        setCountdownNum(null);
+        startTestRef.current();
+      } else {
+        setCountdownNum(tick);
+      }
+    }, 800);
+    return () => clearInterval(id);
+  }, [phase, practiceState, countdownNum]);
+
+  useEffect(() => {
+    if (phase === "running" || phase === "questionnaire") setCountdownNum(null);
+  }, [phase]);
 
   useEffect(() => () => {
     clearTimers();
@@ -874,19 +906,71 @@ export default function ScreeningPage() {
               Muat data demo
             </button>
 
+            {/* Test mode selector */}
+            <div style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Mode tes:</span>
+              <button
+                type="button"
+                className={testMode === "quick" ? "primary-button" : "secondary-button"}
+                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                onClick={() => setTestMode("quick")}
+              >
+                Cepat (90 detik)
+              </button>
+              <button
+                type="button"
+                className={testMode === "clinical" ? "primary-button" : "secondary-button"}
+                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                onClick={() => setTestMode("clinical")}
+              >
+                Standar (3 menit)
+              </button>
+            </div>
+
             {/* Practice section */}
             <div style={{ marginTop: "24px", borderTop: "1px solid var(--surface-border)", paddingTop: "20px" }}>
               <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 12px", lineHeight: 1.6 }}>
-                Latihan singkat — tekan SPASI saat lingkaran hijau muncul, tahan saat merah.
+                Latihan singkat — tekan SPASI saat <strong style={{ color: "var(--accent)" }}>lingkaran hijau</strong> muncul, tahan saat <strong style={{ color: "#b42318" }}>kotak merah</strong>. Stimulus persis seperti tes utama.
               </p>
+
+              {/* Live practice stimulus preview (mirrors real CPT shapes) */}
+              {practiceState === "running" && practiceKind && (
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: "14px", height: 80, alignItems: "center" }}>
+                  <div
+                    className={`stimulus-shape ${practiceKind === "no-go" ? "shape-stop" : ""}`}
+                    style={{ width: 64, height: 64 }}
+                  />
+                </div>
+              )}
+
+              {/* Countdown overlay before CPT starts */}
+              {countdownNum !== null && (
+                <div style={{ fontSize: "3rem", fontWeight: 800, color: "var(--accent)", margin: "16px 0", fontFamily: "var(--font-display)" }}>
+                  {countdownNum}
+                </div>
+              )}
+
               {practiceState === "running" && (
                 <div style={{ marginBottom: "14px" }}>
                   <p style={{ fontSize: "0.92rem", fontWeight: 600, color: "var(--accent)", margin: "0 0 4px" }}>
                     {practiceFeedback}
                   </p>
                   <p style={{ fontSize: "0.78rem", color: "var(--text-secondary)", margin: 0 }}>
-                    Skor: {practiceScore} / {PRACTICE_SEQUENCE.length}
+                    Skor: {practiceScore}/{PRACTICE_SEQUENCE.length}
+                    {practiceRt !== null && ` · ${practiceRt} ms`}
                   </p>
+                  {/* Progress bar */}
+                  <div style={{ marginTop: "8px", height: 4, background: "var(--surface-border)", borderRadius: 2, overflow: "hidden" }}>
+                    <div
+                      style={{
+                        height: "100%",
+                        width: `${Math.round((practiceScore + (practiceResponded && practiceKind === "go" ? 1 : 0)) / PRACTICE_SEQUENCE.length * 100)}%`,
+                        background: "var(--accent)",
+                        borderRadius: 2,
+                        transition: "width 0.3s ease",
+                      }}
+                    />
+                  </div>
                 </div>
               )}
               {practiceState === "passed" && (
@@ -918,7 +1002,7 @@ export default function ScreeningPage() {
                   <button
                     type="button"
                     className="secondary-button"
-                    onClick={() => { setPracticeState("passed"); startTest(); }}
+                    onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
                   >
                     Lewati Latihan → Mulai Tes
                   </button>
