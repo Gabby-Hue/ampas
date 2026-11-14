@@ -750,9 +750,10 @@ export default function ScreeningPage() {
     const tickTrailing = () => {
       const now = performance.now();
       const elapsed = now - startT;
-      const progress = elapsed / 4000; // 4s sinusoidal cycle
-      const ballX = 0.5 + 0.35 * Math.sin(2 * Math.PI * progress);
-      const ballY = 0.5;
+      // 5000ms per full 2D lemniscate loop (Figure-8 / Smooth 2D Osu Orbit)
+      const t = (2 * Math.PI * elapsed) / 5000;
+      const ballX = 0.5 + 0.32 * Math.sin(t);
+      const ballY = 0.5 + 0.20 * Math.sin(2 * t);
       setTrailingBallPos({ x: ballX, y: ballY });
       setTrailingSecondsLeft(Math.max(0, Math.ceil((duration - elapsed) / 1000)));
 
@@ -766,7 +767,7 @@ export default function ScreeningPage() {
         if (currentGaze && currentGaze.valid) {
           isValid = true;
           mappedGazeX = Math.max(0.05, Math.min(0.95, 0.5 + (currentGaze.x - 0.5) * 2.8));
-          mappedGazeY = Math.max(0.1, Math.min(0.9, 0.5 + (currentGaze.y - 0.5) * 2.5));
+          mappedGazeY = Math.max(0.08, Math.min(0.92, 0.5 + (currentGaze.y - 0.5) * 2.5));
         }
 
         trailingSamplesRef.current.push({
@@ -1318,31 +1319,45 @@ export default function ScreeningPage() {
         <section className="trailing-canvas" aria-live="polite">
           <div className="trailing-topbar">
             <span className="trailing-label">
-              Tahap 3 dari 4 · Trailing Eyes (Smooth Pursuit)
+              Tahap 3 dari 4 · Trailing Eyes (2D Smooth Pursuit)
             </span>
             <span className="trailing-timer">{trailingSecondsLeft}s</span>
           </div>
 
-          <div style={{ position: "relative", width: "100%", height: "260px", margin: "auto 0" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: "800px", height: "clamp(260px, 45vh, 420px)", margin: "auto 0" }}>
             {cameraStatus === "ready" && (
               <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
             )}
 
-            {/* Target Trailing Rail Guide */}
-            <div className="trailing-rail" />
+            {/* 2D Lemniscate Guide Track (Figure-8 Osu Slider Guide) */}
+            <svg
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+            >
+              <path
+                d="M 50.0 50.0 L 53.1 53.9 L 56.2 57.7 L 59.3 61.1 L 62.2 64.1 L 65.1 66.6 L 67.8 68.5 L 70.3 69.6 L 72.6 70.0 L 74.7 69.6 L 76.6 68.5 L 78.2 66.6 L 79.6 64.1 L 80.6 61.1 L 81.4 57.7 L 81.8 53.9 L 82.0 50.0 L 81.8 46.1 L 81.4 42.3 L 80.6 38.9 L 79.6 35.9 L 78.2 33.4 L 76.6 31.5 L 74.7 30.4 L 72.6 30.0 L 70.3 30.4 L 67.8 31.5 L 65.1 33.4 L 62.2 35.9 L 59.3 38.9 L 56.2 42.3 L 53.1 46.1 L 50.0 50.0 L 46.9 53.9 L 43.8 57.7 L 40.7 61.1 L 37.8 64.1 L 34.9 66.6 L 32.2 68.5 L 29.7 69.6 L 27.4 70.0 L 25.3 69.6 L 23.4 68.5 L 21.8 66.6 L 20.4 64.1 L 19.4 61.1 L 18.6 57.7 L 18.2 53.9 L 18.0 50.0 L 18.2 46.1 L 18.6 42.3 L 19.4 38.9 L 20.4 35.9 L 21.8 33.4 L 23.4 31.5 L 25.3 30.4 L 27.4 30.0 L 29.7 30.4 L 32.2 31.5 L 34.9 33.4 L 37.8 35.9 L 40.7 38.9 L 43.8 42.3 L 46.9 46.1 L 50.0 50.0 Z"
+                fill="none"
+                stroke="color-mix(in srgb, var(--accent) 30%, transparent)"
+                strokeWidth="2.5"
+                strokeDasharray="4 4"
+              />
+            </svg>
 
-            {/* Moving Target Ball */}
+            {/* Moving Target Ball with glowing pulse */}
             <div
               className="trailing-target"
               style={{
                 left: `${trailingBallPos.x * 100}%`,
                 top: `${trailingBallPos.y * 100}%`,
               }}
-            />
+            >
+              <span className="osu-pulse-ring" />
+            </div>
           </div>
 
-          <div style={{ textAlign: "center", maxWidth: "480px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5 }}>
-            Tahan kepala tetap stabil menghadap layar. Ikuti pergerakan bola hijau dengan tatapan mata Anda selama 10 detik.
+          <div style={{ textAlign: "center", maxWidth: "520px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5 }}>
+            Tahan kepala tetap stabil menghadap layar. Ikuti pergerakan bola hijau yang meluncur di lintasan dengan tatapan mata Anda (10 detik).
           </div>
 
           <button

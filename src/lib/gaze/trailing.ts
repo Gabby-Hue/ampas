@@ -35,18 +35,20 @@ export function calculateTrailingMetrics(samples: TrailingSample[]): TrailingMet
 
   for (let i = 0; i < valid.length; i++) {
     const s = valid[i];
-    const dev = Math.abs(s.gazeX - s.targetX);
+    const dx = s.gazeX - s.targetX;
+    const dy = (s.gazeY ?? 0.5) - (s.targetY ?? 0.5);
+    const dev = Math.sqrt(dx * dx + dy * dy);
     sumDev += dev;
 
-    if (dev <= 0.16) {
+    if (dev <= 0.18) {
       onTrackCount++;
     }
 
     if (i > 0) {
       const prev = valid[i - 1];
-      const deltaGaze = Math.abs(s.gazeX - prev.gazeX);
-      const deltaTarget = Math.abs(s.targetX - prev.targetX);
-      if (deltaGaze > 0.20 && deltaTarget < 0.08) {
+      const deltaGaze = Math.sqrt((s.gazeX - prev.gazeX) ** 2 + ((s.gazeY ?? 0.5) - (prev.gazeY ?? 0.5)) ** 2);
+      const deltaTarget = Math.sqrt((s.targetX - prev.targetX) ** 2 + ((s.targetY ?? 0.5) - (prev.targetY ?? 0.5)) ** 2);
+      if (deltaGaze > 0.22 && deltaTarget < 0.10) {
         intrusiveSaccades++;
       }
     }
@@ -83,31 +85,34 @@ export function generateDemoTrailingSamples(profile: "stable" | "variable"): Tra
 
   for (let i = 0; i < count; i++) {
     const timeMs = (i / (count - 1)) * durationMs;
-    // 4000ms per full pendulum cycle
-    const phaseAngle = (2 * Math.PI * timeMs) / 4000;
-    const targetX = 0.5 + 0.35 * Math.sin(phaseAngle);
-    const targetY = 0.5;
+    // 5000ms per full 2D lemniscate loop (2 full loops in 10s)
+    const t = (2 * Math.PI * timeMs) / 5000;
+    const targetX = 0.5 + 0.32 * Math.sin(t);
+    const targetY = 0.5 + 0.20 * Math.sin(2 * t);
 
     let gazeX = targetX;
     let gazeY = targetY;
 
     if (profile === "stable") {
       // Subtle smooth pursuit noise (< 0.04)
-      const noise = Math.sin(i * 0.4) * 0.02 + ((i * 7) % 5 - 2) * 0.005;
-      gazeX = Math.max(0.05, Math.min(0.95, targetX + noise));
-      gazeY = Math.max(0.1, Math.min(0.9, targetY + noise * 0.5));
+      const noiseX = Math.sin(i * 0.4) * 0.02 + (((i * 7) % 5) - 2) * 0.005;
+      const noiseY = Math.cos(i * 0.4) * 0.02 + (((i * 11) % 5) - 2) * 0.005;
+      gazeX = Math.max(0.05, Math.min(0.95, targetX + noiseX));
+      gazeY = Math.max(0.08, Math.min(0.92, targetY + noiseY));
     } else {
-      // Phase lag: eyes lag behind target by ~300ms
-      const lagAngle = (2 * Math.PI * Math.max(0, timeMs - 300)) / 4000;
-      let lagGazeX = 0.5 + 0.35 * Math.sin(lagAngle) + ((i * 11) % 7 - 3) * 0.02;
+      // Phase lag: eyes lag behind target by ~320ms
+      const lagT = (2 * Math.PI * Math.max(0, timeMs - 320)) / 5000;
+      let lagGazeX = 0.5 + 0.32 * Math.sin(lagT) + (((i * 11) % 7) - 3) * 0.025;
+      let lagGazeY = 0.5 + 0.20 * Math.sin(2 * lagT) + (((i * 13) % 7) - 3) * 0.025;
 
-      // 3 Intrusive saccades at specific intervals (glancing away)
+      // 3 Intrusive saccades at specific intervals (glancing away abruptly)
       if ((i >= 24 && i <= 27) || (i >= 52 && i <= 55) || (i >= 78 && i <= 81)) {
         lagGazeX = (i >= 52 && i <= 55) ? 0.15 : 0.85;
+        lagGazeY = (i >= 52 && i <= 55) ? 0.85 : 0.15;
       }
 
       gazeX = Math.max(0.05, Math.min(0.95, lagGazeX));
-      gazeY = 0.5 + Math.cos(i * 0.3) * 0.08;
+      gazeY = Math.max(0.08, Math.min(0.92, lagGazeY));
     }
 
     samples.push({

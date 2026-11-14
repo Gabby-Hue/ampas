@@ -143,23 +143,26 @@ export function TrailingVisualization({ samples, metrics, isDemo = false }: Prop
       });
     } else {
       // SPATIAL TRACK & HEATMAP VIEW
-      // Draw horizontal target rail in center
-      const railY = height * 0.5;
+      // Draw 2D Lemniscate guide path (Figure-8 / Smooth 2D Osu Orbit)
       ctx.strokeStyle = "rgba(11, 122, 83, 0.25)";
-      ctx.lineWidth = 24;
+      ctx.lineWidth = 16;
       ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.beginPath();
-      ctx.moveTo(width * 0.15, railY);
-      ctx.lineTo(width * 0.85, railY);
+      const loopSteps = 64;
+      for (let i = 0; i <= loopSteps; i++) {
+        const t = (2 * Math.PI * i) / loopSteps;
+        const px = (0.5 + 0.32 * Math.sin(t)) * width;
+        const py = (0.5 + 0.20 * Math.sin(2 * t)) * height;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
       ctx.stroke();
 
-      // Centerline
+      // Centerline dashed guide
       ctx.strokeStyle = "#0b7a53";
       ctx.lineWidth = 2;
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(width * 0.15, railY);
-      ctx.lineTo(width * 0.85, railY);
+      ctx.setLineDash([5, 5]);
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -209,9 +212,9 @@ export function TrailingVisualization({ samples, metrics, isDemo = false }: Prop
       ctx.fillStyle = "#0b7a53";
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
-      ctx.fillText("Batas Kiri (15%)", width * 0.15, railY + 28);
-      ctx.fillText("Batas Kanan (85%)", width * 0.85, railY + 28);
-      ctx.fillText("Pusat Lintasan", width * 0.5, railY - 18);
+      ctx.fillText("Orbit Loop Kiri", width * 0.18, height * 0.5 + 24);
+      ctx.fillText("Orbit Loop Kanan", width * 0.82, height * 0.5 + 24);
+      ctx.fillText("Pusat Salib (Foveal)", width * 0.5, height * 0.5 - 14);
     }
   }, [samples, viewMode]);
 
