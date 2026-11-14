@@ -838,8 +838,8 @@ export default function ScreeningPage() {
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
   const currentAsrsAnswered = asrsAnswers[currentAsrsQuestion.id] !== undefined;
   return (
-    <main className={`site-shell screening-shell ${phase === "ready" || phase === "running" ? "exam-mode-hide-nav" : ""}`}>
-      {(phase !== "ready" && phase !== "running") && (
+    <main className={`site-shell screening-shell ${phase === "running" || phase === "trailing" ? "exam-mode-hide-nav" : ""}`}>
+      {phase !== "running" && phase !== "trailing" && (
       <nav className="nav-wrap">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
