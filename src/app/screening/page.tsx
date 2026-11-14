@@ -121,7 +121,6 @@ export default function ScreeningPage() {
   const [testMode, setTestMode] = useState<TestMode>("quick");
 
   // Tier 2 Pre-flight Integrity & Environmental Protocol
-  const [skipCamera, setSkipCamera] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [tabDistractionCount, setTabDistractionCount] = useState(0);
 
@@ -130,7 +129,6 @@ export default function ScreeningPage() {
   const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
   const [practiceScore, setPracticeScore] = useState(0);
   const [practiceRt, setPracticeRt] = useState<number | null>(null);
-  const [countdownNum, setCountdownNum] = useState<number | null>(null);
   const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
   const [practiceTrialVisible, setPracticeTrialVisible] = useState(false);
   const [practiceStepIndex, setPracticeStepIndex] = useState(0);
@@ -932,194 +930,165 @@ export default function ScreeningPage() {
         </section>
       )}
 
-      {/* STEP 1 (PERSIAPAN): Pengaturan kamera, kuesioner ASRS, dan latihan CPT */}
+      {/* TAHAP 2 (PERSIAPAN): Sederhana, modern & bersih khas Bara */}
       {phase === "ready" && (
-        <section className="lab-viewport">
-          <div className="lab-frame" style={{ textAlign: "center", padding: "48px 24px" }}>
-            {/* Sesi 1: WHO ASRS Status Card */}
-            <div
-              style={{
-                maxWidth: 480,
-                margin: "0 auto 20px",
-                padding: "12px 18px",
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--surface-border)",
-                background: "var(--surface-bg)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "12px",
-                textAlign: "left",
-              }}
+        <section className="screening-intro">
+          <p className="status-line">
+            <span className="status-dot" /> Tahap 2 dari 4 · Persiapan Penapisan
+          </p>
+          <h1>
+            Satu menit untuk melihat <em>ritmemu.</em>
+          </h1>
+          <p className="hero-lede">
+            Pengukuran performa perhatian Go/No-Go. Respons hanya saat lingkaran hijau muncul, tahan respons saat kotak merah.
+          </p>
+
+          {/* Kartu Status WHO ASRS */}
+          <div className="asrs-status-strip">
+            <div>
+              <span className="strip-tag">Kuesioner Baku WHO ASRS v1.1</span>
+              <strong>
+                {asrsResult
+                  ? `Skor: ${asrsResult.totalScore}/24 (${asrsResult.significantCount}/6 item positif)`
+                  : "Belum diisi (opsional untuk rujukan klinis)"}
+              </strong>
+            </div>
+            <button
+              type="button"
+              className="camera-button"
+              onClick={() => setPhase("questionnaire")}
             >
-              <div>
-                <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--accent)" }}>
-                  Tahap 1/4 · Kuesioner WHO ASRS v1.1
-                </div>
-                <div style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text-primary)", marginTop: "2px" }}>
-                  {asrsResult
-                    ? `Skor: ${asrsResult.totalScore}/24 (${asrsResult.significantCount}/6 item positif)`
-                    : "Belum diisi (opsional untuk rujukan klinis)"}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ fontSize: "0.78rem", padding: "6px 12px", height: "auto" }}
-                onClick={() => setPhase("questionnaire")}
-              >
-                {asrsResult ? "Ubah Jawaban" : "Isi Kuesioner →"}
-              </button>
+              {asrsResult ? "Ubah Jawaban" : "Isi Kuesioner →"}
+            </button>
+          </div>
+
+          {/* Kartu Kamera Opsional */}
+          <div className="camera-box">
+            <div>
+              <strong>Kamera Tatapan Mata (Opsional)</strong>
+              <p>
+                {cameraStatus === "ready"
+                  ? "Preview lokal on-device aktif. Koordinat iris diproses tanpa menyimpan video."
+                  : cameraStatus === "denied"
+                  ? "Kamera tidak diizinkan. Tes tetap bisa dijalankan secara normal."
+                  : "Aktifkan kamera untuk mengukur stabilitas tatapan foveal secara eksperimental."}
+              </p>
             </div>
-
-            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
-              Arahkan wajah Anda ke kamera dan pastikan cahaya cukup.<br />
-              Tes akan dimulai secara otomatis setelah persiapan selesai.
-            </p>
-
-            {/* Circular Camera Preview */}
-            <div className="reticle-container" style={{ maxWidth: 320, margin: "0 auto 28px" }}>
-              {cameraStatus === "ready" ? (
-                <video ref={videoRef} muted playsInline style={{ width: "100%", borderRadius: "50%" }} />
-              ) : (
-                <div className="reticle-placeholder" style={{ height: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                  <span className="reticle-hint-label">Kamera siap</span>
-                  <span className="reticle-hint-sub">Pusatkan wajah di dalam lingkaran</span>
-                </div>
-              )}
-              <div className="reticle-crosshair" />
-            </div>
-
-            {/* Controls */}
-            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "20px", flexWrap: "wrap" }}>
-              {cameraStatus !== "ready" ? (
-                <button type="button" className="primary-button" onClick={enableCamera} disabled={cameraStatus === "starting"}>
-                  {cameraStatus === "starting" ? "Menghubungkan..." : "Aktifkan kamera"}
+            {cameraStatus === "ready" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <video ref={videoRef} className="camera-preview" muted playsInline />
+                <button type="button" className="camera-button" onClick={stopCamera}>
+                  Matikan
                 </button>
-              ) : (
-                <button type="button" className="secondary-button" onClick={stopCamera}>Matikan kamera</button>
-              )}
+              </div>
+            ) : (
               <button
                 type="button"
-                className="secondary-button"
-                aria-pressed={skipCamera}
-                style={skipCamera ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
-                onClick={() => setSkipCamera((prev) => !prev)}
+                className="camera-button"
+                onClick={enableCamera}
+                disabled={cameraStatus === "starting"}
               >
-                {skipCamera ? "Mode tanpa kamera aktif" : "Lanjut tanpa kamera"}
+                {cameraStatus === "starting" ? "Menghubungkan…" : "Aktifkan kamera"}
               </button>
-            </div>
+            )}
+          </div>
 
-            {/* Demo benchmarks for judges/presentation */}
-            <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", marginBottom: "8px" }}>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
-                onClick={() => loadBenchmark("stable")}
-              >
-                Muat Demo (Profil Stabil / Neurotypical)
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
-                onClick={() => loadBenchmark("variable")}
-              >
-                Muat Demo (Profil Variabel / ADHD-Pattern)
-              </button>
+          {/* Kartu Mode Tes */}
+          <div className="camera-box">
+            <div>
+              <strong>Durasi Tes</strong>
+              <p>Pilih durasi sesi yang paling sesuai dengan kebutuhanmu.</p>
             </div>
-
-            {/* Test mode selector */}
-            <div style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Mode tes:</span>
+            <div style={{ display: "flex", gap: "8px" }}>
               <button
                 type="button"
-                className={testMode === "quick" ? "primary-button" : "secondary-button"}
-                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                className={testMode === "quick" ? "primary-button" : "camera-button"}
+                style={{ padding: "8px 16px", minHeight: "38px", fontSize: "0.78rem" }}
                 onClick={() => setTestMode("quick")}
               >
                 Cepat (90 detik)
               </button>
               <button
                 type="button"
-                className={testMode === "clinical" ? "primary-button" : "secondary-button"}
-                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                className={testMode === "clinical" ? "primary-button" : "camera-button"}
+                style={{ padding: "8px 16px", minHeight: "38px", fontSize: "0.78rem" }}
                 onClick={() => setTestMode("clinical")}
               >
                 Standar (3 menit)
               </button>
             </div>
+          </div>
 
-            {/* Practice section */}
-            <div style={{ marginTop: "24px", borderTop: "1px solid var(--surface-border)", paddingTop: "20px" }}>
-              {practiceState === "idle" && (
-                <div>
-                  <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", margin: "0 0 6px", fontWeight: 500 }}>
-                    Simulasi latihan — 6 stimulus persis seperti tes utama
-                  </p>
-                  <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.5 }}>
-                    Lingkaran <span style={{ color: "var(--accent)", fontWeight: 600 }}>hijau</span> = tekan SPASI&ensp;·&ensp;
-                    Kotak <span style={{ color: "#b42318", fontWeight: 600 }}>merah</span> = tahan tangan
-                  </p>
-                  <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
-                    <button type="button" className="primary-button" onClick={startGuidedPractice}>
-                      Mulai Latihan
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => { setIsDemo(false); startTest(); }}
-                    >
-                      Mulai Tes Utama Sekarang →
-                    </button>
-                  </div>
-                </div>
-              )}
-              {practiceState === "running" && (
-                <p style={{ fontSize: "0.82rem", color: "var(--accent)", margin: 0 }}>
-                  ◉ Latihan berjalan — lihat layar penuh di atas
-                </p>
-              )}
-              {practiceState === "passed" && (
-                <div>
-                  <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 10px", fontWeight: 600 }}>
-                    ✓ {practiceFeedback}
-                  </p>
-                  {countdownNum !== null && (
-                    <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 12px" }}>
-                      Memulai tes utama dalam {countdownNum} detik...
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
-                  >
-                    Mulai Sekarang →
-                  </button>
-                </div>
-              )}
-              {practiceState === "retry" && (
-                <div>
-                  <p style={{ fontSize: "0.88rem", color: "var(--warning)", margin: "0 0 12px" }}>
-                    {practiceFeedback}
-                  </p>
-                  <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
-                    <button type="button" className="primary-button" onClick={startGuidedPractice}>
-                      Ulangi Latihan
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
-                    >
-                      Tetap lanjut →
-                    </button>
-                  </div>
-                </div>
-              )}
+          {/* Kartu Simulasi Latihan Kilat */}
+          <div className="camera-box">
+            <div>
+              <strong>Aturan Respons Stimulus</strong>
+              <p>
+                Lingkaran <span style={{ color: "var(--accent)", fontWeight: 700 }}>hijau (Go)</span>: Tekan Spasi / Sentuh Layar.
+                <br />
+                Kotak <span style={{ color: "var(--danger)", fontWeight: 700 }}>merah (No-Go)</span>: Tahan tangan, jangan tekan.
+              </p>
             </div>
+            {practiceState === "idle" && (
+              <button
+                type="button"
+                className="camera-button"
+                onClick={startGuidedPractice}
+              >
+                Coba Latihan (6x)
+              </button>
+            )}
+            {practiceState === "passed" && (
+              <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: "0.82rem" }}>
+                Latihan Lulus ✓
+              </span>
+            )}
+            {practiceState === "retry" && (
+              <button
+                type="button"
+                className="camera-button"
+                onClick={startGuidedPractice}
+              >
+                Ulangi Latihan
+              </button>
+            )}
+          </div>
+
+          <div className="screening-notes">
+            <span>Video tidak disimpan</span>
+            <span>Pemrosesan on-device</span>
+            <span>Bukan diagnosis medis</span>
+          </div>
+
+          <div className="hero-actions" style={{ marginTop: "32px", width: "100%" }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setIsDemo(false);
+                startTest();
+              }}
+            >
+              Mulai tes utama <span aria-hidden="true">→</span>
+            </button>
+            <span className="demo-label">Demo sintetis:</span>
+            <button
+              type="button"
+              className="demo-link"
+              onClick={() => loadBenchmark("stable")}
+            >
+              Stable
+            </button>
+            <button
+              type="button"
+              className="demo-link"
+              onClick={() => loadBenchmark("variable")}
+            >
+              Variable
+            </button>
+            <Link className="text-link" href="/">
+              Batalkan
+            </Link>
           </div>
         </section>
       )}
