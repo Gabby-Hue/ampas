@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProfileIconButton } from "@/components/ProfileIconButton";
 import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
 import { persistSessionToStorage } from "@/lib/storage/history";
@@ -68,6 +69,16 @@ type ApiAnalysis = {
   };
 };
 
+// Practice mirrors real CPT: 250ms flash, random ISI 1000–2000ms between trials
+const PRACTICE_SEQUENCE: Array<{ kind: "go" | "no-go"; delayMs: number }> = [
+  { kind: "go",     delayMs: 1450 },
+  { kind: "no-go",  delayMs: 1800 },
+  { kind: "go",     delayMs: 1200 },
+  { kind: "go",     delayMs: 1650 },
+  { kind: "no-go",  delayMs: 1900 },
+  { kind: "go",     delayMs: 1350 },
+];
+
 const DEMO_STABLE_TRACE: GazeSample[] = Array.from({ length: 64 }, (_, i) => ({
   x: 0.5 + Math.sin(i * 0.4) * 0.035 + (((i * 13) % 7) - 3) * 0.004,
   y: 0.5 + Math.cos(i * 0.4) * 0.035 + (((i * 17) % 7) - 3) * 0.004,
@@ -108,28 +119,35 @@ export default function ScreeningPage() {
   const [caffeineRecent] = useState<boolean>(false);
   const [screenTimeHours] = useState<ScreenExposure>("2-5");
   const [testMode, setTestMode] = useState<TestMode>("quick");
-  const [consent, setConsent] = useState(true);
-  const [secondsLeft, setSecondsLeft] = useState(90);
 
   // Tier 2 Pre-flight Integrity & Environmental Protocol
   const [skipCamera, setSkipCamera] = useState(false);
   const [cameraStatus, setCameraStatus] = useState<"off" | "starting" | "ready" | "denied">("off");
   const [tabDistractionCount, setTabDistractionCount] = useState(0);
 
-  // Practice Step (Go / No-Go verification)
-  const [practiceStep, setPracticeStep] = useState<"go" | "no-go" | "done">("go");
-  const advancePractice = () => {
-    if (practiceStep === "go") setPracticeStep("no-go");
-    else if (practiceStep === "no-go") setPracticeStep("done");
-  };
+  // Guided Timed Practice (6 real 250ms flash trials)
+  const [practiceState, setPracticeState] = useState<"idle" | "running" | "passed" | "retry">("idle");
+  const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
+  const [practiceScore, setPracticeScore] = useState(0);
+  const [practiceRt, setPracticeRt] = useState<number | null>(null);
+  const [countdownNum, setCountdownNum] = useState<number | null>(null);
+  const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
+  const [practiceTrialVisible, setPracticeTrialVisible] = useState(false);
+  const [practiceStepIndex, setPracticeStepIndex] = useState(0);
+  const practiceActiveRef = useRef<{ kind: "go" | "no-go"; shownAt: number; responded: boolean } | null>(null);
+  const practiceCorrectRef = useRef(0);
+  const practiceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const practiceFlashRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runPracticeStepRef = useRef<(idx: number) => void>(() => undefined);
 
   // Main CPT Running State
   const [trial, setTrial] = useState<Trial | null>(null);
   const [stimulusVisible, setStimulusVisible] = useState(false);
   const [trials, setTrials] = useState<Trial[]>([]);
-  const [feedback, setFeedback] = useState("Tekan hanya saat beacon hijau muncul.");
+  const [, setFeedback] = useState("");
 
   // Results & AI State
+  const [analysisMode, setAnalysisMode] = useState<"layperson" | "clinical">("layperson");
   const [analysis, setAnalysis] = useState<ApiAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState(false);
@@ -152,11 +170,11 @@ export default function ScreeningPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const plannedTrials = useRef<CptTrial[]>(createStructuredCptTrials("clinical"));
 
-  // Record gaze samples during active running or trailing
+  // Record gaze samples during active running, trailing, or practice
   const gaze = useGazeTracking(
     videoRef,
     cameraStatus === "ready",
-    phase === "running" || phase === "trailing"
+    phase === "running" || phase === "trailing" || (phase === "ready" && practiceState === "running")
   );
 
   const trialIndex = useRef(0);
@@ -188,6 +206,8 @@ export default function ScreeningPage() {
     if (flashTimer.current) clearTimeout(flashTimer.current);
     if (endTimer.current) clearTimeout(endTimer.current);
     if (clockTimer.current) clearInterval(clockTimer.current);
+    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
+    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -474,7 +494,7 @@ export default function ScreeningPage() {
     activeTrialRef.current = next;
     setTrial(next);
     setStimulusVisible(true);
-    setFeedback(next.kind === "go" ? "GO · tekan sekarang" : "NO-GO · tahan respons");
+    setFeedback("Amati stimulus kilat · Fokus pada tanda (+)");
 
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => {
@@ -509,20 +529,96 @@ export default function ScreeningPage() {
     setTrial(null);
     setStimulusVisible(false);
     setPhase("running");
-    setFeedback("Siap… amati stimulus pada layar.");
+    setFeedback("Bersiap… fiksasikan mata pada tanda (+) di tengah layar.");
 
     trialTimer.current = setTimeout(() => showTrialRef.current(), 1200);
     endTimer.current = setTimeout(() => endSessionRef.current(), duration);
-    const initialSecs = Math.round(duration / 1000);
-    setSecondsLeft(initialSecs);
     clockTimer.current = setInterval(() => {
-      setSecondsLeft((s) => Math.max(0, s - 1));
+      // internal clock tracking
     }, 1000);
   }, [clearTimers, gaze, subjectContext]);
 
   useEffect(() => {
     startTestRef.current = startTest;
   }, [startTest]);
+
+  // Guided Timed Flash Practice Engine
+  const runPracticeStep = (idx: number) => {
+    if (idx >= PRACTICE_SEQUENCE.length) {
+      const score = practiceCorrectRef.current;
+      setPracticeScore(score);
+      if (score >= 4) {
+        setPracticeState("passed");
+        setPracticeFeedback(`Latihan lulus (${score}/${PRACTICE_SEQUENCE.length} benar). Kalibrasi motorik siap.`);
+      } else {
+        setPracticeState("retry");
+        setPracticeFeedback(`Akurasi latihan rendah (${score}/${PRACTICE_SEQUENCE.length}). Ulangi agar paham pola kilat 250ms.`);
+      }
+      return;
+    }
+
+    const step = PRACTICE_SEQUENCE[idx];
+    practiceActiveRef.current = { kind: step.kind, shownAt: performance.now(), responded: false };
+    setPracticeStepIndex(idx);
+    setPracticeKind(step.kind);
+
+    setPracticeRt(null);
+    setPracticeTrialVisible(true);
+    setPracticeFeedback(step.kind === "go" ? "HIJAU: Tekan SPACE / Tombol sekarang!" : "MERAH: Tahan, jangan tekan!");
+
+    practiceFlashRef.current = setTimeout(() => setPracticeTrialVisible(false), 250);
+
+    practiceTimerRef.current = setTimeout(() => {
+      const active = practiceActiveRef.current;
+      if (active && !active.responded) {
+        if (active.kind === "no-go") {
+          practiceCorrectRef.current += 1;
+          setPracticeFeedback("Bagus! Berhasil menahan diri pada No-Go.");
+        } else {
+          setPracticeFeedback("Terlewat: target hijau terlalu cepat lewat.");
+        }
+      }
+      runPracticeStepRef.current(idx + 1);
+    }, step.delayMs);
+  };
+
+  useEffect(() => {
+    runPracticeStepRef.current = runPracticeStep;
+  });
+
+  const startGuidedPractice = () => {
+    if (practiceTimerRef.current) clearTimeout(practiceTimerRef.current);
+    if (practiceFlashRef.current) clearTimeout(practiceFlashRef.current);
+    practiceCorrectRef.current = 0;
+    practiceActiveRef.current = null;
+    setPracticeStepIndex(0);
+    setPracticeScore(0);
+    setPracticeRt(null);
+    setPracticeKind(null);
+
+    setPracticeTrialVisible(false);
+    setPracticeState("running");
+    setPracticeFeedback("Bersiap melihat 6 stimulus kilat 250ms…");
+    practiceTimerRef.current = setTimeout(() => runPracticeStep(0), 800);
+  };
+
+  const handlePracticeRespond = useCallback(() => {
+    if (practiceState !== "running") return;
+    const active = practiceActiveRef.current;
+    if (!active || active.responded) return;
+    active.responded = true;
+    const rt = Math.round(performance.now() - active.shownAt);
+    setPracticeRt(rt);
+    if (active.kind === "go") {
+      practiceCorrectRef.current += 1;
+      if (rt < 200) setPracticeFeedback(`Cepat sekali! (${rt} ms)`);
+      else if (rt > 600) setPracticeFeedback(`Terlambat... (${rt} ms)`);
+      else setPracticeFeedback(`Tepat! (${rt} ms)`);
+    } else {
+      practiceCorrectRef.current -= 1;
+      setPracticeFeedback("Komisi! Tahan saat merah.");
+    }
+  }, [practiceState]);
 
   const loadBenchmark = (profile: "stable" | "variable") => {
     clearTimers();
@@ -647,6 +743,10 @@ export default function ScreeningPage() {
   }, [phase, gaze.latestSample, completeAllTesting]);
 
   const respond = useCallback(() => {
+    if (phase === "ready" && practiceState === "running") {
+      handlePracticeRespond();
+      return;
+    }
     if (phase !== "running") return;
     const active = activeTrialRef.current;
     if (!active || active.response) return;
@@ -655,19 +755,41 @@ export default function ScreeningPage() {
     activeTrialRef.current = completed;
     trialsRef.current = [...trialsRef.current, completed];
     setTrials(trialsRef.current);
-    setFeedback(response === "hit" ? "Tepat" : "Terlalu cepat · tahan saat merah");
-  }, [phase]);
+    setFeedback(response === "hit" ? "Tepat ✓" : "Terburu-buru · tahan saat merah");
+  }, [phase, practiceState, handlePracticeRespond]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.code === "Space" && phase === "running") {
+      if (event.code === "Space" && (phase === "running" || (phase === "ready" && practiceState === "running"))) {
         event.preventDefault();
         respond();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [respond, phase]);
+  }, [respond, phase, practiceState]);
+
+  // Countdown 3-2-1 then auto-start CPT after practice passes
+  useEffect(() => {
+    if (phase !== "ready" || practiceState !== "passed") return;
+    let tick = 3;
+    setCountdownNum(tick);
+    const id = setInterval(() => {
+      tick -= 1;
+      if (tick <= 0) {
+        clearInterval(id);
+        setCountdownNum(null);
+        startTestRef.current();
+      } else {
+        setCountdownNum(tick);
+      }
+    }, 800);
+    return () => clearInterval(id);
+  }, [phase, practiceState]);
+
+  useEffect(() => {
+    if (phase === "running" || phase === "questionnaire") setCountdownNum(null);
+  }, [phase]);
 
   useEffect(() => () => {
     clearTimers();
@@ -716,284 +838,408 @@ export default function ScreeningPage() {
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
   const currentAsrsAnswered = asrsAnswers[currentAsrsQuestion.id] !== undefined;
   return (
-    <main className="site-shell screening-shell">
+    <main className={`site-shell screening-shell ${phase === "ready" || phase === "running" ? "exam-mode-hide-nav" : ""}`}>
+      {(phase !== "ready" && phase !== "running") && (
       <nav className="nav-wrap">
         <Link className="brand" href="/">
           <span className="brand-mark">OC</span>
           <span>OculiCare</span>
         </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-          {user && <ProfileIconButton user={user} />}
-          <span className="microcopy" style={{ margin: 0 }}>
-            SCREENING /{" "}
-            {phase === "running"
-              ? "IN PROGRESS"
-              : phase === "trailing"
-              ? "TRAILING EYES"
+        <div className="nav-center-menu">
+          <Link href="/">Beranda</Link>
+          <span className="status-pill">
+            {phase === "questionnaire"
+              ? `Sesi 1, soal ${asrsStep + 1} dari ${ASRS_QUESTIONS.length}`
               : phase === "results"
-              ? "RESULTS"
-              : "SETUP"}
+              ? "Ringkasan hasil"
+              : "Persiapan"}
           </span>
         </div>
+        <div className="nav-right-actions">
+          <ThemeToggle />
+          {user ? (
+            <ProfileIconButton user={user} />
+          ) : (
+            <Link className="text-link" href="/login">
+              Masuk
+            </Link>
+          )}
+        </div>
       </nav>
-
-      {/* STEP 2 (SESI 1): WHO ASRS Kuesioner Baku */}
-      {phase === "questionnaire" && (
-        <section className="screening-intro">
-          <p className="status-line">
-            <span className="status-dot" /> Kuesioner WHO ASRS v1.1
-          </p>
-          <div className="cpt-meta" style={{ marginTop: "14px" }}>
-            <span>PERTANYAAN GEJALA 6 BULAN</span>
-            <strong>
-              Soal {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
-            </strong>
-          </div>
-          <h2 style={{ margin: "20px 0 16px", fontSize: "1.35rem", lineHeight: 1.4, color: "var(--ink)" }}>
-            {currentAsrsQuestion.question}
-          </h2>
-
-          <div className="likert-scale">
-            {ASRS_OPTIONS.map((opt) => (
-              <button
-                type="button"
-                key={opt.value}
-                className={`likert-btn ${asrsAnswers[currentAsrsQuestion.id] === opt.value ? "selected" : ""}`}
-                onClick={() => setAsrsAnswers((prev) => ({ ...prev, [currentAsrsQuestion.id]: opt.value }))}
-              >
-                <span className="scale-num">0{opt.value}</span>
-                <span>{opt.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="hero-actions" style={{ marginTop: "24px" }}>
-            {asrsStep > 0 ? (
-              <button type="button" className="secondary-button" onClick={() => setAsrsStep((s) => Math.max(0, s - 1))}>
-                ← Sebelumnya
-              </button>
-            ) : (
-              <button type="button" className="secondary-button" onClick={() => setPhase("ready")}>
-                Kembali ke persiapan
-              </button>
-            )}
-            {asrsStep < ASRS_QUESTIONS.length - 1 ? (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={!currentAsrsAnswered}
-                onClick={() => setAsrsStep((s) => Math.min(ASRS_QUESTIONS.length - 1, s + 1))}
-              >
-                Soal berikutnya →
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="primary-button"
-                disabled={!currentAsrsAnswered}
-                onClick={finishSesi1AndStartCpt}
-              >
-                Simpan &amp; Lanjut ke Tes →
-              </button>
-            )}
-          </div>
-        </section>
       )}
 
-      {/* STEP 1: Persiapan & Setup (Bara Original Style) */}
-      {phase === "ready" && (
-        <section className="screening-intro">
-          <p className="status-line">
-            <span className="status-dot" /> Langkah 2 dari 3: Persiapan Penapisan
-          </p>
-          <h1>
-            Satu menit untuk melihat <em>ritmemu.</em>
-          </h1>
-          <p className="hero-lede">
-            Beacon hijau berarti <strong>Go</strong>: tekan Space atau tombol di layar. Asteroid merah berarti <strong>No-Go</strong>: jangan tekan apa pun. Ini adalah pengukuran performa tugas, bukan diagnosis.
-          </p>
-
-          <label className="consent-row">
-            <input
-              type="checkbox"
-              checked={consent}
-              onChange={(event) => setConsent(event.target.checked)}
-            />
-            <span>
-              Saya memahami bahwa ini adalah screening performa, bukan diagnosis. Kamera opsional; video tidak disimpan atau dikirim.
-            </span>
-          </label>
-
-          {/* Sesi 1: WHO ASRS Status Card */}
-          <div className="practice-card">
-            <div>
-              <strong>Kuesioner Baku WHO ASRS v1.1</strong>
-              <p>
-                {asrsResult
-                  ? `Hasil tersimpan: Skor ${asrsResult.totalScore}/24 (${asrsResult.significantCount}/6 item positif).`
-                  : "6 pertanyaan validasi gejala inatensi & impulsivitas dalam 6 bulan terakhir."}
-              </p>
+      {/* STEP 2 (SESI 1): WHO ASRS - Zen Likert Scale 1 Soal per Halaman */}
+      {phase === "questionnaire" && (
+        <section className="lab-viewport">
+          <div className="lab-frame">
+            <div className="lab-header">
+              <span className="lab-tag">Kuesioner WHO ASRS v1.1</span>
+              <span className="lab-step-indicator">
+                Soal {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
+              </span>
             </div>
-            <button
-              type="button"
-              className="camera-button"
-              onClick={() => setPhase("questionnaire")}
-            >
-              {asrsResult ? "Ubah Jawaban" : "Isi Kuesioner"}
-            </button>
-          </div>
 
-          {/* Latihan singkat (Bara Practice Step) */}
-          <div className="practice-card">
-            <div>
-              <strong>Latihan singkat</strong>
-              <p>
-                {practiceStep === "go"
-                  ? "Contoh 1 dari 2: saat lingkaran hijau muncul, tekan tombol latihan."
-                  : practiceStep === "no-go"
-                  ? "Contoh 2 dari 2: saat lingkaran merah muncul, tahan respons (jangan tekan)."
-                  : "Latihan selesai. Kamu siap menjalankan sesi."}
-              </p>
+            <div className="question-statement">
+              {currentAsrsQuestion.question}
             </div>
-            {practiceStep !== "done" ? (
-              <>
-                <div className={`practice-stimulus practice-${practiceStep}`} aria-hidden="true" />
+
+            <div className="likert-scale">
+              {ASRS_OPTIONS.map((opt) => (
                 <button
                   type="button"
-                  className="camera-button"
-                  disabled={!consent}
-                  onClick={advancePractice}
+                  key={opt.value}
+                  className={`likert-btn ${asrsAnswers[currentAsrsQuestion.id] === opt.value ? "selected" : ""}`}
+                  onClick={() => setAsrsAnswers((prev) => ({ ...prev, [currentAsrsQuestion.id]: opt.value }))}
                 >
-                  {practiceStep === "go" ? "Tekan contoh Go" : "Saya paham No-Go"}
+                  <span className="scale-num">0{opt.value}</span>
+                  <span>{opt.label}</span>
                 </button>
-              </>
-            ) : (
-              <span className="practice-complete">Siap ✓</span>
-            )}
-          </div>
-
-          {/* Kamera box */}
-          <div className="camera-box">
-            <div role="status" aria-live="polite">
-              <strong>Kamera opsional</strong>
-              <p>
-                {cameraStatus === "ready"
-                  ? "Preview lokal aktif — video tidak direkam atau dikirim ke server."
-                  : cameraStatus === "denied"
-                  ? "Kamera tidak tersedia. Tes tetap bisa dilanjutkan tanpa kamera."
-                  : "Tambahkan kamera untuk mengukur kestabilan tatapan foveal on-device."}
-              </p>
+              ))}
             </div>
-            {cameraStatus === "ready" ? (
-              <video ref={videoRef} className="camera-preview" muted playsInline />
-            ) : (
-              <button
-                type="button"
-                className="camera-button"
-                onClick={enableCamera}
-              >
-                {cameraStatus === "starting" ? "Memulai kamera…" : "Aktifkan kamera"}
-              </button>
-            )}
-          </div>
 
-          <div className="screening-notes">
-            <span>Video tidak disimpan</span>
-            <span
-              style={{ cursor: "pointer" }}
-              onClick={() => setTestMode((m) => (m === "quick" ? "clinical" : "quick"))}
-            >
-              {testMode === "quick" ? "Mode Cepat (90 detik)" : "Standar (3 menit)"}
-            </span>
-            <span
-              style={{ cursor: "pointer" }}
-              onClick={() => setSkipCamera((s) => !s)}
-            >
-              {skipCamera ? "Tanpa kamera" : "Kamera on-device"}
-            </span>
-          </div>
+            <div className="lab-footer">
+              {asrsStep > 0 ? (
+                <button type="button" className="secondary-button" onClick={() => setAsrsStep((s) => Math.max(0, s - 1))}>
+                  Kembali
+                </button>
+              ) : (
+                <button type="button" className="secondary-button" onClick={() => setPhase("ready")}>
+                  Kembali ke persiapan
+                </button>
+              )}
 
-          <div className="hero-actions">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={!consent || practiceStep !== "done"}
-              onClick={() => {
-                setIsDemo(false);
-                startTest();
+              {asrsStep < ASRS_QUESTIONS.length - 1 ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={!currentAsrsAnswered}
+                  onClick={() => setAsrsStep((s) => Math.min(ASRS_QUESTIONS.length - 1, s + 1))}
+                >
+                  Soal berikutnya
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={!currentAsrsAnswered}
+                  onClick={finishSesi1AndStartCpt}
+                >
+                  Selesai &amp; Lanjut ke Persiapan CPT →
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* STEP 1 (PERSIAPAN): Pengaturan kamera, kuesioner ASRS, dan latihan CPT */}
+      {phase === "ready" && (
+        <section className="lab-viewport">
+          <div className="lab-frame" style={{ textAlign: "center", padding: "48px 24px" }}>
+            {/* Sesi 1: WHO ASRS Status Card */}
+            <div
+              style={{
+                maxWidth: 480,
+                margin: "0 auto 20px",
+                padding: "12px 18px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--surface-border)",
+                background: "var(--surface-bg)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                textAlign: "left",
               }}
             >
-              Mulai tes <span aria-hidden="true">→</span>
-            </button>
-            <span className="demo-label">Demo sintetis:</span>
-            <button
-              type="button"
-              className="demo-link"
-              disabled={!consent || practiceStep !== "done"}
-              onClick={() => loadBenchmark("stable")}
-            >
-              Stable
-            </button>
-            <button
-              type="button"
-              className="demo-link"
-              disabled={!consent || practiceStep !== "done"}
-              onClick={() => loadBenchmark("variable")}
-            >
-              Variable
-            </button>
-            <Link className="text-link" href="/">
-              Batalkan
-            </Link>
+              <div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--accent)" }}>
+                  Tahap 1/4 · Kuesioner WHO ASRS v1.1
+                </div>
+                <div style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text-primary)", marginTop: "2px" }}>
+                  {asrsResult
+                    ? `Skor: ${asrsResult.totalScore}/24 (${asrsResult.significantCount}/6 item positif)`
+                    : "Belum diisi (opsional untuk rujukan klinis)"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.78rem", padding: "6px 12px", height: "auto" }}
+                onClick={() => setPhase("questionnaire")}
+              >
+                {asrsResult ? "Ubah Jawaban" : "Isi Kuesioner →"}
+              </button>
+            </div>
+
+            <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
+              Arahkan wajah Anda ke kamera dan pastikan cahaya cukup.<br />
+              Tes akan dimulai secara otomatis setelah persiapan selesai.
+            </p>
+
+            {/* Circular Camera Preview */}
+            <div className="reticle-container" style={{ maxWidth: 320, margin: "0 auto 28px" }}>
+              {cameraStatus === "ready" ? (
+                <video ref={videoRef} muted playsInline style={{ width: "100%", borderRadius: "50%" }} />
+              ) : (
+                <div className="reticle-placeholder" style={{ height: 200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                  <span className="reticle-hint-label">Kamera siap</span>
+                  <span className="reticle-hint-sub">Pusatkan wajah di dalam lingkaran</span>
+                </div>
+              )}
+              <div className="reticle-crosshair" />
+            </div>
+
+            {/* Controls */}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center", marginBottom: "20px", flexWrap: "wrap" }}>
+              {cameraStatus !== "ready" ? (
+                <button type="button" className="primary-button" onClick={enableCamera} disabled={cameraStatus === "starting"}>
+                  {cameraStatus === "starting" ? "Menghubungkan..." : "Aktifkan kamera"}
+                </button>
+              ) : (
+                <button type="button" className="secondary-button" onClick={stopCamera}>Matikan kamera</button>
+              )}
+              <button
+                type="button"
+                className="secondary-button"
+                aria-pressed={skipCamera}
+                style={skipCamera ? { borderColor: "var(--accent)", color: "var(--accent)" } : undefined}
+                onClick={() => setSkipCamera((prev) => !prev)}
+              >
+                {skipCamera ? "Mode tanpa kamera aktif" : "Lanjut tanpa kamera"}
+              </button>
+            </div>
+
+            {/* Demo benchmarks for judges/presentation */}
+            <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
+                onClick={() => loadBenchmark("stable")}
+              >
+                Muat Demo (Profil Stabil / Neurotypical)
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
+                onClick={() => loadBenchmark("variable")}
+              >
+                Muat Demo (Profil Variabel / ADHD-Pattern)
+              </button>
+            </div>
+
+            {/* Test mode selector */}
+            <div style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>Mode tes:</span>
+              <button
+                type="button"
+                className={testMode === "quick" ? "primary-button" : "secondary-button"}
+                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                onClick={() => setTestMode("quick")}
+              >
+                Cepat (90 detik)
+              </button>
+              <button
+                type="button"
+                className={testMode === "clinical" ? "primary-button" : "secondary-button"}
+                style={{ padding: "4px 12px", fontSize: "0.78rem", height: "auto" }}
+                onClick={() => setTestMode("clinical")}
+              >
+                Standar (3 menit)
+              </button>
+            </div>
+
+            {/* Practice section */}
+            <div style={{ marginTop: "24px", borderTop: "1px solid var(--surface-border)", paddingTop: "20px" }}>
+              {practiceState === "idle" && (
+                <div>
+                  <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", margin: "0 0 6px", fontWeight: 500 }}>
+                    Simulasi latihan — 6 stimulus persis seperti tes utama
+                  </p>
+                  <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 16px", lineHeight: 1.5 }}>
+                    Lingkaran <span style={{ color: "var(--accent)", fontWeight: 600 }}>hijau</span> = tekan SPASI&ensp;·&ensp;
+                    Kotak <span style={{ color: "#b42318", fontWeight: 600 }}>merah</span> = tahan tangan
+                  </p>
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                    <button type="button" className="primary-button" onClick={startGuidedPractice}>
+                      Mulai Latihan
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => { setIsDemo(false); startTest(); }}
+                    >
+                      Mulai Tes Utama Sekarang →
+                    </button>
+                  </div>
+                </div>
+              )}
+              {practiceState === "running" && (
+                <p style={{ fontSize: "0.82rem", color: "var(--accent)", margin: 0 }}>
+                  ◉ Latihan berjalan — lihat layar penuh di atas
+                </p>
+              )}
+              {practiceState === "passed" && (
+                <div>
+                  <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 10px", fontWeight: 600 }}>
+                    ✓ {practiceFeedback}
+                  </p>
+                  {countdownNum !== null && (
+                    <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 12px" }}>
+                      Memulai tes utama dalam {countdownNum} detik...
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
+                  >
+                    Mulai Sekarang →
+                  </button>
+                </div>
+              )}
+              {practiceState === "retry" && (
+                <div>
+                  <p style={{ fontSize: "0.88rem", color: "var(--warning)", margin: "0 0 12px" }}>
+                    {practiceFeedback}
+                  </p>
+                  <div style={{ display: "flex", gap: "10px", justifyContent: "center", flexWrap: "wrap" }}>
+                    <button type="button" className="primary-button" onClick={startGuidedPractice}>
+                      Ulangi Latihan
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
+                    >
+                      Tetap lanjut →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </section>
       )}
 
-      {/* PHASE 2: Active CPT Running Stage (Bara Pure Stimulus Card) */}
-      {phase === "running" && (
-        <section className="cpt-stage" aria-live="polite">
-          {cameraStatus === "ready" && (
-            <video ref={videoRef} className="camera-monitor" muted playsInline aria-hidden="true" />
-          )}
-          <div className="cpt-meta">
-            <span>PERFORMA PERHATIAN</span>
-            <strong>{secondsLeft}s</strong>
+      {/* PRACTICE CANVAS — full-screen mirror of the real CPT test */}
+      {practiceState === "running" && (
+        <section
+          className="pure-cpt-canvas exam-white"
+          aria-live="polite"
+          role="presentation"
+          onClick={respond}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            respond();
+          }}
+          style={{ cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}
+        >
+          <div className="cpt-crosshair" />
+          <div className="clinical-stimulus">
+            {practiceTrialVisible && practiceKind && (
+              <div className={`stimulus-shape ${practiceKind === "no-go" ? "shape-stop" : ""}`} />
+            )}
           </div>
+
+          {/* Practice HUD — subtly overlaid at bottom */}
           <div
-            className={`stimulus ${
-              stimulusVisible && trial
-                ? trial.kind === "go"
-                  ? "stimulus-go"
-                  : "stimulus-stop"
-                : "stimulus-idle"
-            }`}
-            onClick={respond}
+            style={{
+              position: "absolute",
+              bottom: 0,
+              left: 0,
+              right: 0,
+              padding: "14px 24px 18px",
+              background: "linear-gradient(to top, rgba(255,255,255,0.97) 60%, transparent)",
+              display: "flex",
+              alignItems: "flex-end",
+              justifyContent: "space-between",
+              pointerEvents: "none",
+            }}
           >
-            <span>{stimulusVisible && trial ? (trial.kind === "go" ? "GO" : "NO-GO") : "+"}</span>
+            <div style={{ pointerEvents: "auto" }}>
+              <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 2px" }}>
+                Latihan · Trial {practiceStepIndex + 1} / {PRACTICE_SEQUENCE.length} (Ketuk layar / Space)
+              </p>
+              <p style={{ fontSize: "0.72rem", color: "var(--text-secondary)", margin: 0 }}>
+                {practiceFeedback}
+                {practiceRt !== null && `&ensp;·&ensp;${practiceRt} ms`}
+              </p>
+            </div>
+            <div style={{ textAlign: "right", pointerEvents: "auto" }}>
+              <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", margin: "0 0 2px" }}>Skor</p>
+              <p style={{ fontSize: "1.3rem", fontWeight: 700, color: "var(--accent)", margin: 0, lineHeight: 1 }}>
+                {practiceScore}<span style={{ fontSize: "0.78rem", color: "var(--text-muted)", fontWeight: 400 }}>/{PRACTICE_SEQUENCE.length}</span>
+              </p>
+            </div>
           </div>
-          <p className="cpt-feedback">{feedback}</p>
-          <button className="response-button" onClick={respond} aria-label="Tekan untuk merespons">
-            TEKAN / SPACE
-          </button>
-          <button className="stop-session-button" onClick={startTrailingStage}>
-            Akhiri sesi &amp; Lanjut
-          </button>
-          <p className="microcopy">Tetap nyaman. Kamu bisa berhenti kapan saja dengan menutup halaman.</p>
         </section>
       )}
 
-      {/* PHASE 3: Trailing Eyes Stage (2D Smooth Pursuit Osu Style) */}
+      {/* PHASE 2: Pure Sensory Blind CPT Stage — white exam-paper look, no nav, no hint */}
+      {phase === "running" && (
+        <section
+          className="pure-cpt-canvas exam-white"
+          aria-live="polite"
+          onClick={respond}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            respond();
+          }}
+          style={{ cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}
+        >
+          {cameraStatus === "ready" && (
+            <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
+          )}
+
+          <div className="cpt-crosshair" />
+
+          {/* Clinical Geometric Stimulus: Circle (Go) / Square (No-Go) as in QbTest/TOVA */}
+          <div className="clinical-stimulus">
+            {stimulusVisible && trial && (
+              <div
+                className={`stimulus-shape ${trial.kind === "no-go" ? "shape-stop" : ""}`}
+              />
+            )}
+          </div>
+
+          {/* Subtle touch cue at bottom */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "16px",
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              fontSize: "0.74rem",
+              color: "rgba(0,0,0,0.35)",
+              letterSpacing: "0.04em",
+              pointerEvents: "none",
+            }}
+          >
+            Ketuk layar atau tekan SPASI saat stimulus hijau muncul
+          </div>
+        </section>
+      )}
+
+      {/* PHASE 3: Trailing Eyes Stage (Smooth Pursuit 10 Detik) */}
       {phase === "trailing" && (
         <section className="trailing-canvas" aria-live="polite">
           <div className="trailing-topbar">
-            <span>TAHAP 3/4 · TRAILING EYES</span>
-            <strong>{trailingSecondsLeft}s</strong>
+            <span className="trailing-label">
+              Tahap 3 dari 4 · Trailing Eyes (2D Smooth Pursuit)
+            </span>
+            <span className="trailing-timer">{trailingSecondsLeft}s</span>
           </div>
 
-          <div style={{ position: "relative", width: "min(680px, 100%)", height: "320px", margin: "16px 0" }}>
+          <div style={{ position: "relative", width: "100%", maxWidth: "800px", height: "clamp(260px, 45vh, 420px)", margin: "auto 0" }}>
             {cameraStatus === "ready" && (
               <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
             )}
+
+            {/* 2D Lemniscate Guide Track (Figure-8 Osu Slider Guide) */}
             <svg
               viewBox="0 0 100 100"
               preserveAspectRatio="none"
@@ -1002,11 +1248,13 @@ export default function ScreeningPage() {
               <path
                 d="M 50.0 50.0 L 53.1 53.9 L 56.2 57.7 L 59.3 61.1 L 62.2 64.1 L 65.1 66.6 L 67.8 68.5 L 70.3 69.6 L 72.6 70.0 L 74.7 69.6 L 76.6 68.5 L 78.2 66.6 L 79.6 64.1 L 80.6 61.1 L 81.4 57.7 L 81.8 53.9 L 82.0 50.0 L 81.8 46.1 L 81.4 42.3 L 80.6 38.9 L 79.6 35.9 L 78.2 33.4 L 76.6 31.5 L 74.7 30.4 L 72.6 30.0 L 70.3 30.4 L 67.8 31.5 L 65.1 33.4 L 62.2 35.9 L 59.3 38.9 L 56.2 42.3 L 53.1 46.1 L 50.0 50.0 L 46.9 53.9 L 43.8 57.7 L 40.7 61.1 L 37.8 64.1 L 34.9 66.6 L 32.2 68.5 L 29.7 69.6 L 27.4 70.0 L 25.3 69.6 L 23.4 68.5 L 21.8 66.6 L 20.4 64.1 L 19.4 61.1 L 18.6 57.7 L 18.2 53.9 L 18.0 50.0 L 18.2 46.1 L 18.6 42.3 L 19.4 38.9 L 20.4 35.9 L 21.8 33.4 L 23.4 31.5 L 25.3 30.4 L 27.4 30.0 L 29.7 30.4 L 32.2 31.5 L 34.9 33.4 L 37.8 35.9 L 40.7 38.9 L 43.8 42.3 L 46.9 46.1 L 50.0 50.0 Z"
                 fill="none"
-                stroke="rgba(21, 63, 59, 0.22)"
-                strokeWidth="2"
+                stroke="color-mix(in srgb, var(--accent) 30%, transparent)"
+                strokeWidth="2.5"
                 strokeDasharray="4 4"
               />
             </svg>
+
+            {/* Moving Target Ball with glowing pulse */}
             <div
               className="trailing-target"
               style={{
@@ -1018,98 +1266,296 @@ export default function ScreeningPage() {
             </div>
           </div>
 
-          <p className="hero-lede" style={{ textAlign: "center", maxWidth: "480px", margin: "10px 0 20px" }}>
-            Ikuti pergerakan bola hijau yang meluncur di lintasan dengan tatapan mata Anda selama 10 detik.
-          </p>
-          <button type="button" className="secondary-button" onClick={completeAllTesting}>
-            Selesai &amp; Lihat Hasil →
+          <div style={{ textAlign: "center", maxWidth: "520px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5 }}>
+            Tahan kepala tetap stabil menghadap layar. Ikuti pergerakan bola hijau yang meluncur di lintasan dengan tatapan mata Anda (10 detik).
+          </div>
+
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ marginTop: "24px", fontSize: "0.8rem", padding: "6px 14px" }}
+            onClick={completeAllTesting}
+          >
+            Selesai lebih awal &amp; Lihat Hasil →
           </button>
         </section>
       )}
 
-      {/* PHASE 4: Results Dashboard (Bara Pure Paper Results) */}
+      {/* PHASE 4: Dual-Tone Results Dashboard & Clinical A4 Referral */}
       {phase === "results" && (
-        <section className="results-section">
-          <p className="status-line">
-            <span className="status-dot" />{" "}
-            {isDemo
-              ? `Demo sintetis · ${demoProfile === "stable" ? "stable performance" : "variable performance"}`
-              : "Sesi selesai"}
-          </p>
-          <h1>Ini gambaran <em>performamu.</em></h1>
-          <p className="hero-lede">
-            {isDemo
-              ? "Contoh data sintetis untuk demonstrasi alur dashboard."
-              : "Hasil ini menggambarkan responsmu selama tugas."}{" "}
-            Gunakan sebagai bahan refleksi, bukan kesimpulan medis.
-          </p>
-
-          <div className="session-meta">
-            <span><b>Sesi anonim</b>{sessionId || "OC-LOCAL"}</span>
-            <span><b>Waktu</b>{isDemo ? "Fixture sintetis" : formatSessionDate(sessionStartedAt)}</span>
-            <span><b>Konteks</b>{formatSubjectContextLabel(subjectContext)}</span>
-            <span><b>Versi</b>2.1</span>
+        <section className="screening-content">
+          <div className="results-header">
+            <div className="status-pill">
+              <span className="status-dot" />{" "}
+              {isDemo
+                ? `Simulasi benchmark 6 blok, profil ${demoProfile}`
+                : `Sesi selesai (${actualDurationSec} detik), ${formatSessionDate(sessionStartedAt)}`}
+            </div>
+            <h1 style={{ color: "var(--text-primary)" }}>
+              Hasil pengamatan <em>ritme fokusmu.</em>
+            </h1>
+            <p className="hero-lede" style={{ marginBottom: "14px" }}>
+              ID sesi: <strong>{sessionId || "OC-LOCAL"}</strong> ·{" "}
+              {isDemo ? "Data benchmark sintetis" : formatSubjectContextLabel(subjectContext)}
+            </p>
           </div>
 
-          <div className="results-grid">
-            <div>
-              <span>Median reaction time</span>
-              <strong>{metrics.medianReactionTimeMs ?? 0} ms</strong>
+          {/* DUAL COPYWRITING TABS */}
+          <div className="dual-tone-tabs btn-no-print">
+            <button
+              type="button"
+              className={`tab-btn ${analysisMode === "layperson" ? "active" : ""}`}
+              onClick={() => setAnalysisMode("layperson")}
+            >
+              Penjelasan untuk saya
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${analysisMode === "clinical" ? "active" : ""}`}
+              onClick={() => setAnalysisMode("clinical")}
+            >
+              Lembar rujukan medis
+            </button>
+          </div>
+
+          {/* 3 CORE PILLARS CARD GRID */}
+          <div className="results-grid-cards">
+            <div className="result-card">
+              <div>
+                <div className="result-card-title">
+                  {analysisMode === "layperson" ? "Stamina fokus dan kecepatan" : "Kecepatan psikomotor dan RTV"}
+                </div>
+                <div className="result-card-value">{metrics.medianReactionTimeMs ?? 0} ms</div>
+                <div className="result-card-desc">
+                  {analysisMode === "layperson"
+                    ? "Waktu rata-rata otakmu merespons target hijau yang muncul sekejap."
+                    : `Median RT: ${metrics.medianReactionTimeMs ?? 0} ms · RTV (variabilitas): ${metrics.reactionTimeVariabilityMs ?? 0} ms · Fatigue slope: ${clinicalStats.fatigueSlope ?? 0}/blok.`}
+                </div>
+              </div>
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--accent-teal)" }}>
+                Ketepatan Go: {percent(metrics.hitRate)} · Lapse (&gt;750 ms): {clinicalStats.attentionLapses}
+              </div>
             </div>
-            <div>
-              <span>Go hit rate</span>
-              <strong>{percent(metrics.hitRate)}</strong>
+
+            <div className="result-card">
+              <div>
+                <div className="result-card-title">
+                  {analysisMode === "layperson" ? "Kontrol impuls dan kelengahan" : "Inhibisi dan deteksi sinyal (d')"}
+                </div>
+                <div className="result-card-value">
+                  {analysisMode === "layperson"
+                    ? `${metrics.commissions} salah`
+                    : `d' = ${clinicalStats.dPrime ?? "N/A"}`}
+                </div>
+                <div className="result-card-desc">
+                  {analysisMode === "layperson"
+                    ? "Berapa kali jari terburu-buru menekan target merah yang harusnya ditahan."
+                    : `Commission rate: ${percent(metrics.commissionRate)} (${metrics.commissions}x) · Omission rate: ${percent(metrics.omissionRate)} (${metrics.omissions}x).`}
+                </div>
+              </div>
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--coral-danger)" }}>
+                Terlewat (omission): {metrics.omissions} · Antisipasi (&lt;120 ms): {clinicalStats.anticipatoryResponses}
+              </div>
             </div>
-            <div>
-              <span>Omission error</span>
-              <strong>{metrics.omissions}</strong>
+
+            <div className="result-card">
+              <div>
+                <div className="result-card-title">
+                  {analysisMode === "layperson" ? "Keluhan harian (WHO ASRS)" : "Trait kronis dan konteks"}
+                </div>
+                <div className="result-card-value">
+                  {asrsResult ? `${asrsResult.significantCount}/6` : "-"}
+                </div>
+                <div className="result-card-desc">
+                  {analysisMode === "layperson"
+                    ? asrsResult?.isSignificant
+                      ? "Keluhan sulit fokus dalam 6 bulan terakhir cukup sering dirasakan."
+                      : "Keluhan konsentrasi harian masih dalam batas wajar."
+                    : asrsResult?.interpretationClinical}
+                </div>
+              </div>
+              <div style={{ marginTop: "16px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                Skor ASRS: {asrsResult?.totalScore ?? 0}/24 · Interupsi tab: {tabDistractionCount}x
+              </div>
             </div>
-            <div>
-              <span>Commission error</span>
-              <strong>{metrics.commissions}</strong>
-            </div>
-            <div>
-              <span>Correct rejection</span>
-              <strong>{metrics.correctRejections}</strong>
+
+            {/* ML Prediction Card */}
+            {analysis?.ml_prediction && analysisMode === "clinical" && (
+              <div className="result-card" style={{ borderColor: "var(--accent-teal)" }}>
+                <div>
+                  <div className="result-card-title">Klasifikasi ML (Logistic Regression)</div>
+                  <div className="result-card-value" style={{ color: analysis.ml_prediction.classification === "adhd" ? "var(--coral-danger)" : "var(--accent-teal)" }}>
+                    {analysis.ml_prediction.classification === "adhd" ? "Risk Profile: ADHD-pattern" : "Pattern: Neurotypical"}
+                  </div>
+                  <div className="result-card-desc">
+                    Probabilitas distribusi ADHD: {(analysis.ml_prediction.adhd_probability * 100).toFixed(0)}% · Confidence: {(analysis.ml_prediction.confidence * 100).toFixed(0)}%
+                  </div>
+                </div>
+                <div style={{ marginTop: "16px", fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                  Model: {analysis.ml_prediction.model_version} · Akurasi training: {(analysis.ml_prediction.accuracy * 100).toFixed(0)}%
+                </div>
+              </div>
+            )}
+
+            {/* Ex-Gaussian + GDI Info Card */}
+            <div className="result-card">
+              <div>
+                <div className="result-card-title">
+                  {analysisMode === "layperson" ? "Stamina & kontrol impuls terukur" : "Ex-Gaussian decomposition & Gaze Dispersion"}
+                </div>
+                <div className="result-card-desc" style={{ fontSize: "0.78rem", lineHeight: 1.6 }}>
+                  {metrics.exGaussian.tau !== null && (
+                    <>
+                      <strong>Tau (impulsivitas):</strong> {metrics.exGaussian.tau} ms ·{' '}
+                      <strong>Mu (pemrosesan):</strong> {metrics.exGaussian.mu} ms ·{' '}
+                      <strong>Sigma (variabilitas):</strong> {metrics.exGaussian.sigma} ms
+                      <br />
+                    </>
+                  )}
+                  {gdiSummary.meanGdi !== null ? (
+                    <>
+                      <strong>GDI rata-rata:</strong> {gdiSummary.meanGdi.toFixed(3)} satuan layar ({gdiSummary.trialsWithData} trial terukur) · Max: {gdiSummary.maxGdi?.toFixed(3)}
+                    </>
+                  ) : (
+                    "Data tatapan mata tidak tersedia — sensor okulomotorik dilewati atau coverage rendah."
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: "12px", fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                {metrics.exGaussian.tau !== null && metrics.exGaussian.tau > 35
+                  ? "Tau tinggi mengindikasikan right-skew pada distribusi waktu reaksi — pola khas impulsivitas motorik."
+                  : metrics.exGaussian.tau !== null
+                  ? "Tau dalam rentang normal — distribusi waktu reaksi cenderung simetris."
+                  : ""}
+                {gdiSummary.meanGdi !== null && gdiSummary.meanGdi > 0.08
+                  ? " GDI tinggi menunjukkan dispersi tatapan luas dari target — kemungkinan mind-wandering saat tugas."
+                  : gdiSummary.meanGdi !== null
+                  ? " GDI rendah menunjukkan fiksasi stabil pada area target."
+                  : ""}
+              </div>
             </div>
           </div>
 
-          <div className="metric-glossary">
-            <strong>Memahami metrik</strong>
-            <div>
-              <span><b>Hit rate</b> Go yang ditekan tepat waktu.</span>
-              <span><b>Omission</b> Go yang terlewat.</span>
-              <span><b>Commission</b> respons pada No-Go.</span>
-              <span><b>Correct rejection</b> berhasil menahan respons pada No-Go.</span>
-              <span><b>Reaction time</b> waktu dari stimulus ke respons.</span>
+          {/* DUAL INSIGHT / CLINICAL REFERRAL PANEL */}
+          <div className="analysis-panel">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px", gap: "12px", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: "0.95rem", color: "var(--text-primary)" }}>
+                {analysisMode === "layperson" ? "Kesimpulan dan kebiasaan harian" : "Ringkasan rujukan klinis"}
+              </strong>
+              <button
+                type="button"
+                className="secondary-button btn-no-print"
+                style={{ padding: "6px 14px", fontSize: "0.75rem" }}
+                onClick={() => void requestAnalysisWith(trials, asrsResult, isDemo, actualDurationSec, tabDistractionCount)}
+                disabled={analysisLoading}
+              >
+                {analysisLoading ? "Menganalisis..." : "Perbarui analisis"}
+              </button>
             </div>
+
+            {analysis ? (
+              analysisMode === "layperson" ? (
+                <div>
+                  <h3 style={{ fontSize: "1.05rem", fontWeight: 700, margin: "0 0 6px", color: "var(--accent-teal)" }}>
+                    {analysis.layperson_insight.stamina_headline} · {analysis.layperson_insight.reaction_style_headline}
+                  </h3>
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", margin: "0 0 8px", lineHeight: 1.55 }}>
+                    {analysis.layperson_insight.stamina_description}
+                  </p>
+                  <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", margin: "0 0 14px", lineHeight: 1.55 }}>
+                    {analysis.layperson_insight.reaction_style_description}
+                  </p>
+                  <strong style={{ fontSize: "0.82rem", textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--text-primary)" }}>
+                    Langkah praktis yang bisa dicoba
+                  </strong>
+                  <ul style={{ margin: "8px 0 0", paddingLeft: "20px", fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                    {analysis.layperson_insight.actionable_habits.map((h, i) => (
+                      <li key={i}>{h}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ background: "var(--surface-elevated)", padding: "12px", borderRadius: "10px", marginBottom: "12px", border: "1px solid var(--surface-border)" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Batasan triase: </strong>
+                    <span style={{ fontSize: "0.84rem", color: "var(--text-secondary)" }}>
+                      {analysis.clinical_referral.diagnostic_impression}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Korelasi ASRS dan konteks: </strong>
+                    {analysis.clinical_referral.asrs_clinical_correlation}
+                  </p>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 8px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Psikometri CPT: </strong>
+                    {analysis.clinical_referral.cpt_psychometric_note}
+                  </p>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 12px" }}>
+                    <strong style={{ color: "var(--text-primary)" }}>Stabilitas okulomotor: </strong>
+                    {analysis.clinical_referral.gaze_stability_note}
+                  </p>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Rekomendasi tindak lanjut</strong>
+                  <ul style={{ margin: "6px 0 10px", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                    {analysis.clinical_referral.provisional_recommendations.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                  <strong style={{ fontSize: "0.8rem", textTransform: "uppercase", color: "var(--text-primary)" }}>Keterbatasan metodologis</strong>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                    {analysis.clinical_referral.formal_limitations.map((l, i) => (
+                      <li key={i}>{l}</li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            ) : (
+              <div style={{ padding: "12px 0", color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                {analysisLoading
+                  ? "Menyusun analisis triangulasi (ASRS, CPT 6 blok, dan konteks)..."
+                  : analysisError
+                  ? "Analisis eksternal gagal dimuat. Klik perbarui analisis untuk mencoba ulang."
+                  : "Menyiapkan ringkasan hasil..."}
+              </div>
+            )}
           </div>
 
+          {/* Multi-Block Attention Fatigue Curve */}
           <div className="attention-curve">
             <div className="curve-heading">
-              <strong>Attention curve</strong>
-              <span>per block · hit rate</span>
+              <strong>Kurva stamina dan kecepatan per blok ({attentionBlocks.length} blok)</strong>
+              <span>
+                Fatigue slope: {clinicalStats.fatigueSlope ?? 0}/blok · RT slope: {clinicalStats.rtSlopeMsPerBlock ?? 0} ms/blok
+              </span>
             </div>
             <div className="curve-bars">
-              {attentionBlocks.map((block) => (
-                <div className="curve-column" key={block.index}>
+              {attentionBlocks.map((b) => (
+                <div className="curve-column" key={b.index}>
+                  <div style={{ fontSize: "0.62rem", color: "var(--text-secondary)" }}>
+                    {b.medianRtMs ? `${b.medianRtMs}ms` : "-"}
+                  </div>
                   <div className="curve-track">
                     <div
                       className="curve-fill"
-                      style={{ height: `${Math.max(8, Math.round(block.hitRate * 100))}%` }}
+                      style={{ height: `${Math.max(8, Math.round(b.hitRate * 100))}%` }}
                     />
                   </div>
-                  <span>{block.index + 1}</span>
+                  <span>
+                    B{b.index + 1} ({Math.round(b.hitRate * 100)}%)
+                  </span>
+                  {b.blockPhase && (
+                    <span style={{ fontSize: "0.58rem", color: "var(--text-muted)", textTransform: "uppercase" }}>
+                      {b.blockPhase}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
-            <div className="curve-legend">
-              <span><i className="legend-dot" /> Hit rate</span>
-              <span>Eksperimental · bukan skor klinis</span>
+            <div className="curve-legend" style={{ marginTop: "10px" }}>
+              <span>Penurunan bar di blok 3 sampai 6 mencerminkan kelelahan atensi saat tugas monoton atau tekanan tinggi.</span>
             </div>
           </div>
 
-          {/* Radar Bullseye Heatmap & Trailing Visualization */}
+          {/* Radar Bullseye Thermal Heatmap (Shown for real usable gaze and synthetic demo) */}
           {((!isDemo && gaze.quality.status !== "unavailable") || isDemo) && (
             <RadarGazeHeatmap
               samples={
@@ -1130,6 +1576,7 @@ export default function ScreeningPage() {
             />
           )}
 
+          {/* Trailing Eyes Smooth Pursuit Visualization */}
           {trailingMetrics && (
             <TrailingVisualization
               samples={trailingSamples}
@@ -1138,85 +1585,33 @@ export default function ScreeningPage() {
             />
           )}
 
-          <div className="analysis-box">
-            <div className="curve-heading">
-              <strong>Penjelasan hasil &amp; rujukan</strong>
-              <span>guardrail aktif</span>
-            </div>
-            {analysis ? (
-              <div>
-                <p style={{ marginTop: "10px" }}>
-                  <strong>{analysis.layperson_insight.stamina_headline}:</strong> {analysis.layperson_insight.stamina_description}
-                </p>
-                <p style={{ marginTop: "8px" }}>
-                  <strong>{analysis.layperson_insight.reaction_style_headline}:</strong> {analysis.layperson_insight.reaction_style_description}
-                </p>
-                {analysis.ml_prediction && (
-                  <p style={{ marginTop: "8px", color: "var(--deep)" }}>
-                    <b>Pola Klasifikasi:</b>{" "}
-                    {analysis.ml_prediction.classification === "adhd" ? "Risk Profile (ADHD-pattern)" : "Pattern (Neurotypical)"}{" "}
-                    · Probabilitas: {(analysis.ml_prediction.adhd_probability * 100).toFixed(0)}% (Confidence: {(analysis.ml_prediction.confidence * 100).toFixed(0)}%)
-                  </p>
-                )}
-                <ul style={{ marginTop: "12px" }}>
-                  {analysis.layperson_insight.actionable_habits.map((item, i) => (
-                    <li key={i}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <div style={{ marginTop: "10px" }}>
-                <button
-                  type="button"
-                  className="demo-link"
-                  onClick={() => void requestAnalysisWith(trials, asrsResult, isDemo, actualDurationSec, tabDistractionCount)}
-                  disabled={analysisLoading}
-                >
-                  {analysisLoading ? "Menyusun penjelasan…" : analysisError ? "Coba lagi" : "Buat penjelasan aman"}
-                </button>
-              </div>
+          {/* Footer Actions & Export */}
+          <div className="hero-actions btn-no-print" style={{ marginTop: "28px" }}>
+            <button className="primary-button" onClick={printSummary}>
+              Cetak lembar rujukan (PDF A4)
+            </button>
+            <button className="secondary-button" onClick={downloadJson}>
+              Unduh data telemetri (JSON)
+            </button>
+            {user && (
+              <Link className="secondary-button" href="/dashboard">
+                Lihat di dashboard riwayat
+              </Link>
             )}
-          </div>
-
-          <div className={`result-quality quality-${trials.length >= 20 ? "usable" : trials.length >= 8 ? "limited" : "insufficient"}`}>
-            <span className="status-dot" />
-            <div>
-              <strong>Kualitas sesi: {trials.length >= 20 ? "usable" : "limited"}</strong>
-              <p>
-                Go/No-Go CPT dijalankan secara lokal di peramban. Seluruh proses landmark kamera berjalan on-device tanpa streaming video ke server.
-              </p>
-            </div>
-          </div>
-
-          <div className="report-method">
-            <strong>Metodologi &amp; batasan</strong>
-            <p>
-              Continuous Performance Task mengukur kecepatan reaksi dan daya tahan atensi. Hasil ini bukan diagnosis medis mandiri dan tidak menggantikan konsultasi klinis profesional.
-            </p>
-            <a className="help-link" href="https://www.kemkes.go.id/" target="_blank" rel="noreferrer">
-              Cari informasi layanan kesehatan ↗
-            </a>
-          </div>
-
-          <div className="hero-actions">
-            <button type="button" className="secondary-button" onClick={downloadJson}>
-              Unduh data JSON
-            </button>
-            <button type="button" className="primary-button" onClick={printSummary}>
-              Cetak / simpan PDF <span aria-hidden="true">→</span>
-            </button>
             <button
-              type="button"
               className="secondary-button"
               onClick={() => {
                 setIsDemo(false);
+                setAsrsStep(0);
+                setAsrsAnswers({});
+                setPracticeState("idle");
                 setPhase("ready");
               }}
             >
-              Ulangi tes <span aria-hidden="true">↻</span>
+              Ulangi tes
             </button>
             <Link className="text-link" href="/">
-              Kembali ke beranda
+              Kembali ke Beranda
             </Link>
           </div>
         </section>
