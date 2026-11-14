@@ -104,7 +104,7 @@ function formatSessionDate(value: number | null) {
 }
 
 export default function ScreeningPage() {
-  const [phase, setPhase] = useState<Phase>("ready");
+  const [phase, setPhase] = useState<Phase>("questionnaire");
   const user = useSyncExternalStore<SafeUser | null>(
     subscribeAuth,
     getActiveUser,
@@ -849,10 +849,10 @@ export default function ScreeningPage() {
           <Link href="/">Beranda</Link>
           <span className="status-pill">
             {phase === "questionnaire"
-              ? `Sesi 1, soal ${asrsStep + 1} dari ${ASRS_QUESTIONS.length}`
+              ? `Tahap 1/4 · Kuesioner WHO ASRS (${asrsStep + 1}/${ASRS_QUESTIONS.length})`
               : phase === "results"
               ? "Ringkasan hasil"
-              : "Persiapan"}
+              : "Tahap 2/4 · Persiapan CPT"}
           </span>
         </div>
         <div className="nav-right-actions">
@@ -868,12 +868,12 @@ export default function ScreeningPage() {
       </nav>
       )}
 
-      {/* STEP 2 (SESI 1): WHO ASRS - Zen Likert Scale 1 Soal per Halaman */}
+      {/* TAHAP 1: WHO ASRS - Zen Likert Scale 1 Soal per Halaman */}
       {phase === "questionnaire" && (
         <section className="lab-viewport">
           <div className="lab-frame">
             <div className="lab-header">
-              <span className="lab-tag">Kuesioner WHO ASRS v1.1</span>
+              <span className="lab-tag">Tahap 1 dari 4 · Kuesioner Baku WHO ASRS v1.1</span>
               <span className="lab-step-indicator">
                 Soal {String(asrsStep + 1).padStart(2, "0")} / {String(ASRS_QUESTIONS.length).padStart(2, "0")}
               </span>
@@ -904,7 +904,7 @@ export default function ScreeningPage() {
                 </button>
               ) : (
                 <button type="button" className="secondary-button" onClick={() => setPhase("ready")}>
-                  Kembali ke persiapan
+                  Lewati ke Persiapan CPT →
                 </button>
               )}
 
