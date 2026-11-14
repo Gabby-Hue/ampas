@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --test src/lib/cpt/*.test.mjs src/lib/gaze/*.test.mjs src/lib/export/*.test.mjs src/lib/auth/*.test.mjs src/lib/storage/*.test.mjs"
+    "test": "node --test src/lib/cpt/*.test.mjs src/lib/gaze/*.test.mjs src/lib/export/*.test.mjs src/lib/auth/*.test.mjs src/lib/storage/*.test.mjs src/lib/ml/*.test.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.0",

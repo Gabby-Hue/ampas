@@ -30,8 +30,16 @@ import { useGazeTracking } from "@/lib/gaze/tracking";
 import type { GazeSample } from "@/lib/gaze/quality";
 import { buildSessionExport } from "@/lib/export/session";
 import { calculateTrialGdis, summarizeGdiResults } from "@/lib/cpt/engine";
+import {
+  calculateTrailingMetrics,
+  generateDemoTrailingSamples,
+  type TrailingSample,
+  type TrailingMetrics,
+} from "@/lib/gaze/trailing";
+import { TrailingVisualization } from "@/components/TrailingVisualization";
+import { RadarGazeHeatmap } from "@/components/RadarGazeHeatmap";
 
-type Phase = "questionnaire" | "ready" | "running" | "results";
+type Phase = "questionnaire" | "ready" | "running" | "trailing" | "results";
 type Trial = CptEvent;
 
 type ApiAnalysis = {
@@ -153,15 +161,23 @@ export default function ScreeningPage() {
   const [sessionStartedAt, setSessionStartedAt] = useState<number | null>(null);
   const [actualDurationSec, setActualDurationSec] = useState(360);
 
+  // Trailing Eyes Smooth Pursuit State
+  const [trailingSamples, setTrailingSamples] = useState<TrailingSample[]>([]);
+  const [trailingMetrics, setTrailingMetrics] = useState<TrailingMetrics | null>(null);
+  const [trailingSecondsLeft, setTrailingSecondsLeft] = useState(10);
+  const [trailingBallPos, setTrailingBallPos] = useState({ x: 0.5, y: 0.5 });
+  const trailingSamplesRef = useRef<TrailingSample[]>([]);
+  const trailingStartedAt = useRef(0);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const plannedTrials = useRef<CptTrial[]>(createStructuredCptTrials("clinical"));
 
-  // Record gaze samples ONLY during active running phase when not paused
+  // Record gaze samples during active running, trailing, or practice
   const gaze = useGazeTracking(
     videoRef,
     cameraStatus === "ready",
-    (phase === "running" || (phase === "ready" && practiceState === "running")) && !isTestPaused
+    (phase === "running" || phase === "trailing" || (phase === "ready" && practiceState === "running")) && !isTestPaused
   );
 
   const trialIndex = useRef(0);
@@ -284,9 +300,11 @@ export default function ScreeningPage() {
 
   // Compute per-trial GDI from gaze samples and trial events
   const allGazeSamples = useMemo(() => {
-    // Build flat array of all recorded samples from the tracking hook
-    return (gaze.trace as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>) ?? [];
-  }, [gaze.trace]);
+    const samples = gaze.getAllSamples();
+    return samples.length > 0
+      ? (samples as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>)
+      : ((gaze.trace as Array<{ x: number; y: number; valid: boolean; recordedAt?: number }>) ?? []);
+  }, [gaze]);
 
   const trialGdis = useMemo(
     () => calculateTrialGdis(trials, allGazeSamples),
@@ -294,20 +312,24 @@ export default function ScreeningPage() {
   );
   const gdiSummary = useMemo(() => summarizeGdiResults(trialGdis), [trialGdis]);
 
-
   const requestAnalysisWith = useCallback(
     async (
       targetEvents: Trial[],
       targetAsrs: AsrsResult | null,
       demoFlag: boolean,
       durationSec: number,
-      tabInterruptionsCount: number
+      tabInterruptionsCount: number,
+      explicitGdi?: { meanGdi: number | null; maxGdi: number | null; minGdi: number | null; trialsWithData: number },
+      explicitTrailing?: TrailingMetrics | null
     ) => {
       setAnalysisLoading(true);
       setAnalysisError(false);
       const m = calculateCptMetrics(targetEvents);
       const cStats = calculateClinicalStats(targetEvents);
       const blocks = calculateAttentionBlocks(targetEvents);
+      const activeGdi = explicitGdi ?? gdiSummary;
+      const activeTrailing = explicitTrailing ?? trailingMetrics;
+
       try {
         const response = await fetch("/api/analyze", {
           method: "POST",
@@ -351,10 +373,18 @@ export default function ScreeningPage() {
               data_coverage: demoFlag ? 0 : gaze.quality.coverage,
               relative_dispersion: demoFlag ? 0 : gaze.quality.relativeDispersion,
               out_of_bounds_rate: demoFlag ? 0 : gaze.outOfBoundsRate,
-              mean_gdi: demoFlag ? 0 : (gdiSummary.meanGdi ?? 0),
-              max_gdi: demoFlag ? 0 : (gdiSummary.maxGdi ?? 0),
-              trials_with_gaze_data: demoFlag ? 0 : gdiSummary.trialsWithData,
+              mean_gdi: demoFlag ? 0 : (activeGdi.meanGdi ?? 0),
+              max_gdi: demoFlag ? 0 : (activeGdi.maxGdi ?? 0),
+              trials_with_gaze_data: demoFlag ? 0 : activeGdi.trialsWithData,
             },
+            trailing: activeTrailing
+              ? {
+                  accuracy_percent: activeTrailing.accuracyPercent,
+                  mean_deviation: activeTrailing.meanDeviation,
+                  intrusive_saccades: activeTrailing.intrusiveSaccades,
+                  status: activeTrailing.statusLabel,
+                }
+              : undefined,
             ex_gaussian: demoFlag ? null : {
               mu_ms: m.exGaussian.mu,
               sigma_ms: m.exGaussian.sigma,
@@ -373,14 +403,38 @@ export default function ScreeningPage() {
         setAnalysisLoading(false);
       }
     },
-    [subjectContext, gaze.quality, gaze.outOfBoundsRate, gdiSummary]
+    [subjectContext, gaze.quality, gaze.outOfBoundsRate, gdiSummary, trailingMetrics]
   );
 
-  const endSession = useCallback(() => {
+  const startTrailingStage = useCallback(() => {
+    clearTimers();
     const active = activeTrialRef.current;
     if (active && !active.response) {
       trialsRef.current = [...trialsRef.current, { ...active, response: classifyResponse(active.kind, false) }];
     }
+    const finalTrials = trialsRef.current;
+    setTrials(finalTrials);
+    setTrial(null);
+    setStimulusVisible(false);
+
+    setPhase("trailing");
+    setTrailingSecondsLeft(10);
+    trailingSamplesRef.current = [];
+    trailingStartedAt.current = performance.now();
+  }, [clearTimers]);
+
+  const completeAllTesting = useCallback(() => {
+    clearTimers();
+    stopCamera();
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+
+    const finalSamples = trailingSamplesRef.current;
+    setTrailingSamples(finalSamples);
+    const computedTrailing = calculateTrailingMetrics(finalSamples);
+    setTrailingMetrics(computedTrailing);
+
     const finalTrials = trialsRef.current;
     const finalMetrics = calculateCptMetrics(finalTrials);
     const finalStats = calculateClinicalStats(finalTrials);
@@ -393,13 +447,12 @@ export default function ScreeningPage() {
     setTrial(null);
     setStimulusVisible(false);
     setActualDurationSec(elapsedSec);
-    setPhase("results");
-    stopCamera();
-    clearTimers();
 
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => undefined);
-    }
+    const allSamples = gaze.getAllSamples();
+    const finalTrialGdis = calculateTrialGdis(finalTrials, allSamples);
+    const finalGdiSummary = summarizeGdiResults(finalTrialGdis);
+
+    setPhase("results");
 
     const activeUsr = getActiveUser();
     if (activeUsr && !isDemo) {
@@ -409,7 +462,15 @@ export default function ScreeningPage() {
         durationSeconds: elapsedSec,
         tabInterruptions: tabDistractionCount,
         outOfBoundsRate: gaze.outOfBoundsRate,
-        gdiSummary: gdiSummary,
+        gdiSummary: finalGdiSummary,
+        trailing: computedTrailing
+          ? {
+              accuracy_percent: computedTrailing.accuracyPercent,
+              mean_deviation: computedTrailing.meanDeviation,
+              intrusive_saccades: computedTrailing.intrusiveSaccades,
+              status: computedTrailing.statusLabel,
+            }
+          : undefined,
       });
       persistSessionToStorage({
         sessionId: sessionId || "OC-LOCAL",
@@ -429,24 +490,30 @@ export default function ScreeningPage() {
       });
     }
 
-    void requestAnalysisWith(finalTrials, asrsResult, false, elapsedSec, tabDistractionCount);
+    void requestAnalysisWith(
+      finalTrials,
+      asrsResult,
+      false,
+      elapsedSec,
+      tabDistractionCount,
+      finalGdiSummary,
+      computedTrailing
+    );
   }, [
     clearTimers,
     stopCamera,
     isDemo,
     sessionId,
     asrsResult,
-    gaze.quality,
-    gaze.outOfBoundsRate,
+    gaze,
     subjectContext,
     tabDistractionCount,
     requestAnalysisWith,
-    gdiSummary,
   ]);
 
   useEffect(() => {
-    endSessionRef.current = endSession;
-  }, [endSession]);
+    endSessionRef.current = startTrailingStage;
+  }, [startTrailingStage]);
 
   const showTrial = useCallback(() => {
     if (isTestPaused) return;
@@ -650,6 +717,11 @@ export default function ScreeningPage() {
           : "Skor ASRS v1.1 Part A menunjukkan 5/6 item positif (signifikan secara klinis).",
     };
 
+    const demoTrailing = generateDemoTrailingSamples(profile);
+    const demoTrailingMetrics = calculateTrailingMetrics(demoTrailing);
+    setTrailingSamples(demoTrailing);
+    setTrailingMetrics(demoTrailingMetrics);
+
     trialsRef.current = benchmark;
     setSessionId(`DEMO-${profile.toUpperCase()}`);
     setSessionStartedAt(null);
@@ -663,8 +735,61 @@ export default function ScreeningPage() {
     setDemoProfile(profile);
     setAsrsResult(demoAsrs);
     setPhase("results");
-    void requestAnalysisWith(benchmark, demoAsrs, true, 360, 0);
+    void requestAnalysisWith(benchmark, demoAsrs, true, 360, 0, undefined, demoTrailingMetrics);
   };
+
+  // Trailing Eyes Smooth Pursuit Animation Loop
+  useEffect(() => {
+    if (phase !== "trailing") return;
+    let animId = 0;
+    const duration = 10_000;
+    const startT = performance.now();
+    trailingStartedAt.current = startT;
+    let lastSampleTime = 0;
+
+    const tickTrailing = () => {
+      const now = performance.now();
+      const elapsed = now - startT;
+      const progress = elapsed / 4000; // 4s sinusoidal cycle
+      const ballX = 0.5 + 0.35 * Math.sin(2 * Math.PI * progress);
+      const ballY = 0.5;
+      setTrailingBallPos({ x: ballX, y: ballY });
+      setTrailingSecondsLeft(Math.max(0, Math.ceil((duration - elapsed) / 1000)));
+
+      if (now - lastSampleTime >= 50) {
+        lastSampleTime = now;
+        const currentGaze = gaze.latestSample;
+        let mappedGazeX = ballX;
+        let mappedGazeY = ballY;
+        let isValid = false;
+
+        if (currentGaze && currentGaze.valid) {
+          isValid = true;
+          mappedGazeX = Math.max(0.05, Math.min(0.95, 0.5 + (currentGaze.x - 0.5) * 2.8));
+          mappedGazeY = Math.max(0.1, Math.min(0.9, 0.5 + (currentGaze.y - 0.5) * 2.5));
+        }
+
+        trailingSamplesRef.current.push({
+          timeMs: Math.round(elapsed),
+          targetX: Math.round(ballX * 1000) / 1000,
+          targetY: Math.round(ballY * 1000) / 1000,
+          gazeX: Math.round(mappedGazeX * 1000) / 1000,
+          gazeY: Math.round(mappedGazeY * 1000) / 1000,
+          valid: isValid,
+        });
+      }
+
+      if (elapsed >= duration) {
+        completeAllTesting();
+        return;
+      }
+
+      animId = requestAnimationFrame(tickTrailing);
+    };
+
+    animId = requestAnimationFrame(tickTrailing);
+    return () => cancelAnimationFrame(animId);
+  }, [phase, gaze.latestSample, completeAllTesting]);
 
   const respond = useCallback(() => {
     if (phase === "ready" && practiceState === "running") {
@@ -695,7 +820,7 @@ export default function ScreeningPage() {
 
   // Countdown 3-2-1 then auto-start CPT after practice passes
   useEffect(() => {
-    if (phase !== "ready" || practiceState !== "passed" || countdownNum !== null) return;
+    if (phase !== "ready" || practiceState !== "passed") return;
     let tick = 3;
     setCountdownNum(tick);
     const id = setInterval(() => {
@@ -709,7 +834,7 @@ export default function ScreeningPage() {
       }
     }, 800);
     return () => clearInterval(id);
-  }, [phase, practiceState, countdownNum]);
+  }, [phase, practiceState]);
 
   useEffect(() => {
     if (phase === "running" || phase === "questionnaire") setCountdownNum(null);
@@ -734,6 +859,14 @@ export default function ScreeningPage() {
       tabInterruptions: tabDistractionCount,
       outOfBoundsRate: gaze.outOfBoundsRate,
       gdiSummary,
+      trailing: trailingMetrics
+        ? {
+            accuracy_percent: trailingMetrics.accuracyPercent,
+            mean_deviation: trailingMetrics.meanDeviation,
+            intrusive_saccades: trailingMetrics.intrusiveSaccades,
+            status: trailingMetrics.statusLabel,
+          }
+        : undefined,
     });
     const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -761,7 +894,7 @@ export default function ScreeningPage() {
     const scored = scoreAsrs(asrsAnswers);
     setAsrsResult(scored);
     setIsDemo(false);
-    startTestRef.current();
+    setPhase("ready");
   };
 
   const currentAsrsQuestion = ASRS_QUESTIONS[asrsStep] ?? ASRS_QUESTIONS[0];
@@ -853,7 +986,7 @@ export default function ScreeningPage() {
                   disabled={!currentAsrsAnswered}
                   onClick={finishSesi1AndStartCpt}
                 >
-                  Mulai pengecekan CPT
+                  Selesai &amp; Lanjut ke Persiapan CPT →
                 </button>
               )}
             </div>
@@ -861,10 +994,46 @@ export default function ScreeningPage() {
         </section>
       )}
 
-      {/* STEP 1 (PERSIAPAN): Minimal — kamera saja, tidak bisa diselesaikan */}
+      {/* STEP 1 (PERSIAPAN): Pengaturan kamera, kuesioner ASRS, dan latihan CPT */}
       {phase === "ready" && (
         <section className="lab-viewport">
           <div className="lab-frame" style={{ textAlign: "center", padding: "48px 24px" }}>
+            {/* Sesi 1: WHO ASRS Status Card */}
+            <div
+              style={{
+                maxWidth: 480,
+                margin: "0 auto 20px",
+                padding: "12px 18px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--surface-border)",
+                background: "var(--surface-bg)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                textAlign: "left",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--accent)" }}>
+                  Tahap 1/4 · Kuesioner WHO ASRS v1.1
+                </div>
+                <div style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--text-primary)", marginTop: "2px" }}>
+                  {asrsResult
+                    ? `Skor: ${asrsResult.totalScore}/24 (${asrsResult.significantCount}/6 item positif)`
+                    : "Belum diisi (opsional untuk rujukan klinis)"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.78rem", padding: "6px 12px", height: "auto" }}
+                onClick={() => setPhase("questionnaire")}
+              >
+                {asrsResult ? "Ubah Jawaban" : "Isi Kuesioner →"}
+              </button>
+            </div>
+
             <p style={{ fontSize: "0.82rem", color: "var(--text-muted)", margin: "0 0 20px", lineHeight: 1.6 }}>
               Arahkan wajah Anda ke kamera dan pastikan cahaya cukup.<br />
               Tes akan dimulai secara otomatis setelah persiapan selesai.
@@ -903,15 +1072,25 @@ export default function ScreeningPage() {
               </button>
             </div>
 
-            {/* Demo load */}
-            <button
-              type="button"
-              className="secondary-button"
-              style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.6 }}
-              onClick={() => loadBenchmark("stable")}
-            >
-              Muat data demo
-            </button>
+            {/* Demo benchmarks for judges/presentation */}
+            <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap", marginBottom: "8px" }}>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
+                onClick={() => loadBenchmark("stable")}
+              >
+                Muat Demo (Profil Stabil / Neurotypical)
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                style={{ fontSize: "0.74rem", padding: "5px 12px", opacity: 0.7 }}
+                onClick={() => loadBenchmark("variable")}
+              >
+                Muat Demo (Profil Variabel / ADHD-Pattern)
+              </button>
+            </div>
 
             {/* Test mode selector */}
             <div style={{ marginTop: "20px", display: "flex", alignItems: "center", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
@@ -960,12 +1139,17 @@ export default function ScreeningPage() {
                   <p style={{ fontSize: "0.92rem", color: "var(--accent)", margin: "0 0 10px", fontWeight: 600 }}>
                     ✓ {practiceFeedback}
                   </p>
+                  {countdownNum !== null && (
+                    <p style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 12px" }}>
+                      Memulai tes utama dalam {countdownNum} detik...
+                    </p>
+                  )}
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={() => { setPracticeState("passed"); startTestRef.current(); }}
                   >
-                    Lanjut ke Tes Utama →
+                    Mulai Sekarang →
                   </button>
                 </div>
               )}
@@ -995,7 +1179,17 @@ export default function ScreeningPage() {
 
       {/* PRACTICE CANVAS — full-screen mirror of the real CPT test */}
       {practiceState === "running" && (
-        <section className="pure-cpt-canvas exam-white" aria-live="polite" role="presentation">
+        <section
+          className="pure-cpt-canvas exam-white"
+          aria-live="polite"
+          role="presentation"
+          onClick={respond}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            respond();
+          }}
+          style={{ cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}
+        >
           <div className="cpt-crosshair" />
           <div className="clinical-stimulus">
             {practiceTrialVisible && practiceKind && (
@@ -1020,7 +1214,7 @@ export default function ScreeningPage() {
           >
             <div style={{ pointerEvents: "auto" }}>
               <p style={{ fontSize: "0.78rem", color: "var(--text-muted)", margin: "0 0 2px" }}>
-                Latihan · Trial {practiceStepIndex + 1} / {PRACTICE_SEQUENCE.length}
+                Latihan · Trial {practiceStepIndex + 1} / {PRACTICE_SEQUENCE.length} (Ketuk layar / Space)
               </p>
               <p style={{ fontSize: "0.72rem", color: "var(--text-secondary)", margin: 0 }}>
                 {practiceFeedback}
@@ -1037,9 +1231,18 @@ export default function ScreeningPage() {
         </section>
       )}
 
-      {/* PHASE 3: Pure Sensory Blind CPT Stage — white exam-paper look, no nav, no hint */}
+      {/* PHASE 2: Pure Sensory Blind CPT Stage — white exam-paper look, no nav, no hint */}
       {phase === "running" && (
-        <section className="pure-cpt-canvas exam-white" aria-live="polite">
+        <section
+          className="pure-cpt-canvas exam-white"
+          aria-live="polite"
+          onClick={respond}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            respond();
+          }}
+          style={{ cursor: "pointer", userSelect: "none", WebkitUserSelect: "none" }}
+        >
           {isTestPaused && (
             <div
               style={{
@@ -1090,6 +1293,66 @@ export default function ScreeningPage() {
               />
             )}
           </div>
+
+          {/* Subtle touch cue at bottom */}
+          <div
+            style={{
+              position: "absolute",
+              bottom: "16px",
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              fontSize: "0.74rem",
+              color: "rgba(0,0,0,0.35)",
+              letterSpacing: "0.04em",
+              pointerEvents: "none",
+            }}
+          >
+            Ketuk layar atau tekan SPASI saat stimulus hijau muncul
+          </div>
+        </section>
+      )}
+
+      {/* PHASE 3: Trailing Eyes Stage (Smooth Pursuit 10 Detik) */}
+      {phase === "trailing" && (
+        <section className="trailing-canvas" aria-live="polite">
+          <div className="trailing-topbar">
+            <span className="trailing-label">
+              Tahap 3 dari 4 · Trailing Eyes (Smooth Pursuit)
+            </span>
+            <span className="trailing-timer">{trailingSecondsLeft}s</span>
+          </div>
+
+          <div style={{ position: "relative", width: "100%", height: "260px", margin: "auto 0" }}>
+            {cameraStatus === "ready" && (
+              <video ref={videoRef} className="camera-pip" muted playsInline aria-hidden="true" />
+            )}
+
+            {/* Target Trailing Rail Guide */}
+            <div className="trailing-rail" />
+
+            {/* Moving Target Ball */}
+            <div
+              className="trailing-target"
+              style={{
+                left: `${trailingBallPos.x * 100}%`,
+                top: `${trailingBallPos.y * 100}%`,
+              }}
+            />
+          </div>
+
+          <div style={{ textAlign: "center", maxWidth: "480px", color: "var(--text-secondary)", fontSize: "0.85rem", lineHeight: 1.5 }}>
+            Tahan kepala tetap stabil menghadap layar. Ikuti pergerakan bola hijau dengan tatapan mata Anda selama 10 detik.
+          </div>
+
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ marginTop: "24px", fontSize: "0.8rem", padding: "6px 14px" }}
+            onClick={completeAllTesting}
+          >
+            Selesai lebih awal &amp; Lihat Hasil →
+          </button>
         </section>
       )}
 
@@ -1367,36 +1630,34 @@ export default function ScreeningPage() {
             </div>
           </div>
 
-          {/* Gaze Plot */}
+          {/* Radar Bullseye Thermal Heatmap (Shown for real usable gaze and synthetic demo) */}
           {((!isDemo && gaze.quality.status !== "unavailable") || isDemo) && (
-            <div className="gaze-panel">
-              <div className="curve-heading">
-                <strong>Kestabilan fiksasi mata {isDemo ? "(simulasi sintetis)" : `(${gaze.quality.status})`}</strong>
-                <span>
-                  {isDemo
-                    ? "64 titik benchmark"
-                    : `Cakupan: ${percent(gaze.quality.coverage)} · Di luar batas: ${percent(gaze.outOfBoundsRate)}`}
-                </span>
-              </div>
-              <div className="gaze-plot">
-                {(isDemo ? (demoProfile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE) : gaze.trace)
-                  .filter((s) => s.valid)
-                  .map((s, i) => (
-                    <i
-                      key={i}
-                      style={{
-                        left: `${Math.max(0, Math.min(1, s.x)) * 100}%`,
-                        top: `${Math.max(0, Math.min(1, s.y)) * 100}%`,
-                      }}
-                    />
-                  ))}
-              </div>
-              <p style={{ fontSize: "0.74rem", color: "var(--text-muted)", margin: "8px 0 0" }}>
-                {isDemo
-                  ? "Peta dispersi tatapan sintetis untuk demonstrasi perbandingan profil stabil vs mudah teralihkan."
-                  : "Semakin terpusat titik di persimpangan salib (+), semakin stabil fiksasi pandanganmu pada area target."}
-              </p>
-            </div>
+            <RadarGazeHeatmap
+              samples={
+                isDemo
+                  ? demoProfile === "stable"
+                    ? DEMO_STABLE_TRACE
+                    : DEMO_VARIABLE_TRACE
+                  : (allGazeSamples.length > 0 ? allGazeSamples : gaze.trace)
+              }
+              gdiScore={
+                isDemo
+                  ? demoProfile === "stable"
+                    ? 0.038
+                    : 0.142
+                  : (gdiSummary.meanGdi ?? gaze.quality.relativeDispersion)
+              }
+              isDemo={isDemo}
+            />
+          )}
+
+          {/* Trailing Eyes Smooth Pursuit Visualization */}
+          {trailingMetrics && (
+            <TrailingVisualization
+              samples={trailingSamples}
+              metrics={trailingMetrics}
+              isDemo={isDemo}
+            />
           )}
 
           {/* Footer Actions & Export */}

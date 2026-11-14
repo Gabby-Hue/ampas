@@ -245,7 +245,7 @@ export function useGazeTracking(
                 const calibrated = applyGazeCalibration(rawSample, calibrationRef.current);
                 const withTimestamp = { ...calibrated, recordedAt: now };
                 samplesRef.current.push(withTimestamp);
-                if (samplesRef.current.length > 360) samplesRef.current.shift();
+                if (samplesRef.current.length > 15000) samplesRef.current.shift();
                 setQuality(calculateGazeQuality(samplesRef.current));
                 setOutOfBoundsRate(calculateOutOfBoundsRate(samplesRef.current));
                 setTrace(samplesRef.current.slice(-72));
@@ -253,7 +253,8 @@ export function useGazeTracking(
             } catch {
               setLatestSample({ x: 0, y: 0, valid: false });
               if (recordSamplesRef.current) {
-                samplesRef.current.push({ x: 0, y: 0, valid: false });
+                samplesRef.current.push({ x: 0, y: 0, valid: false, recordedAt: now });
+                if (samplesRef.current.length > 15000) samplesRef.current.shift();
                 setQuality(calculateGazeQuality(samplesRef.current));
                 setOutOfBoundsRate(calculateOutOfBoundsRate(samplesRef.current));
                 setTrace(samplesRef.current.slice(-72));
@@ -289,6 +290,7 @@ export function useGazeTracking(
   }, []);
 
   const getLatestRawSample = useCallback(() => latestRawSampleRef.current, []);
+  const getAllSamples = useCallback(() => [...samplesRef.current], []);
 
   return {
     quality,
@@ -300,6 +302,7 @@ export function useGazeTracking(
     calibration,
     setCalibration,
     getLatestRawSample,
+    getAllSamples,
     latestSample,
     reset,
   };

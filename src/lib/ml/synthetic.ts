@@ -84,9 +84,9 @@ export function extractFeatureArray(sample: FeatureVector): number[] {
     sample.omission_rate,
     sample.median_rt_ms / 600, // normalize to ~0-1 range
     sample.rt_variability_ms / 200,
-    sample.d_prime ?? 1.5,
-    sample.fatigue_slope ?? -0.02,
-    sample.tau_ms ?? 25,
+    (sample.d_prime ?? 1.5) / 3.0,
+    (sample.fatigue_slope ?? -0.02) * 10,
+    (sample.tau_ms ?? 25) / 100, // normalize ms (10-90ms) to ~0.1-0.9
     sample.asrs_score / 24,
   ];
 }

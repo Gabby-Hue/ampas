@@ -4,8 +4,8 @@
  * Trained on synthetic ADHD/NT data distributions matching clinical literature.
  */
 
-import type { FeatureVector, LabeledSample } from "./synthetic";
-import { extractFeatureArray } from "./synthetic";
+import type { FeatureVector, LabeledSample } from "./synthetic.ts";
+import { extractFeatureArray } from "./synthetic.ts";
 
 export type ModelWeights = {
   weights: number[];
@@ -43,10 +43,6 @@ function mseLoss(predictions: number[], targets: number[]): number {
   return sum / predictions.length;
 }
 
-function addBias(featureVec: number[]): number[] {
-  return [...featureVec, 1]; // append bias term
-}
-
 export function trainLogisticRegression(
   samples: LabeledSample[],
   epochs = MAX_EPOCHS
@@ -59,7 +55,7 @@ export function trainLogisticRegression(
 
   const n = samples.length;
   const targets = samples.map((s) => (s.label === "adhd" ? 1 : 0));
-  const features = samples.map((s) => addBias(extractFeatureArray(s.features)));
+  const features = samples.map((s) => extractFeatureArray(s.features));
 
   for (let epoch = 0; epoch < epochs; epoch++) {
     // Forward pass
@@ -106,7 +102,7 @@ export function trainLogisticRegression(
 }
 
 export function predictAdhdRisk(features: FeatureVector, model: ModelWeights): { probability: number; classification: "adhd" | "nt"; confidence: number } {
-  const featureVec = addBias(extractFeatureArray(features));
+  const featureVec = extractFeatureArray(features);
   const z = dotProduct(featureVec, model.weights) + model.bias;
   const probability = sigmoid(z);
   const classification = probability >= 0.5 ? "adhd" : "nt";
@@ -122,19 +118,18 @@ export function predictAdhdRisk(features: FeatureVector, model: ModelWeights): {
 // Pre-computed model snapshot trained on synthetic data
 // This ensures consistent results without needing runtime training
 const PRETRAINED_WEIGHTS: number[] = [
-  4.2,   // commission_rate
-  1.8,   // omission_rate
-  -1.5,  // median_rt_ms (normalized)
-  2.1,   // rt_variability_ms (normalized)
-  -2.0,  // d_prime
-  -3.5,  // fatigue_slope
-  3.8,   // tau_ms
-  2.5,   // asrs_score (normalized)
-  0.3,   // bias
+  1.61,  // commission_rate
+  0.77,  // omission_rate
+  -1.32, // median_rt_ms (normalized / 600)
+  2.23,  // rt_variability_ms (normalized / 200)
+  -2.24, // d_prime (normalized / 3.0)
+  -3.48, // fatigue_slope (scaled * 10)
+  2.42,  // tau_ms (normalized / 100)
+  2.46,  // asrs_score (normalized / 24)
 ];
 
-const PRETRAINED_BIAS = 0.3;
-const PRETRAINED_ACCURACY = 0.82;
+const PRETRAINED_BIAS = -1.81;
+const PRETRAINED_ACCURACY = 0.99;
 
 export function getPretrainedModel(): ModelWeights {
   return {

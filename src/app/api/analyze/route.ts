@@ -115,6 +115,32 @@ function validate(payload: AnalyzePayload) {
   );
 }
 
+function computeMlPrediction(payload: AnalyzePayload) {
+  const cpt = payload.cpt;
+  if (!cpt) return undefined;
+  const mlFeatureVector: FeatureVector = {
+    commission_rate: cpt.commission_rate ?? 0,
+    omission_rate: cpt.omission_rate ?? 0,
+    median_rt_ms: cpt.median_rt_ms ?? 440,
+    rt_variability_ms: cpt.rt_variability_ms ?? 60,
+    d_prime: cpt.d_prime ?? 2.0,
+    fatigue_slope: cpt.fatigue_slope ?? -0.02,
+    tau_ms: payload.ex_gaussian?.tau_ms ?? null,
+    asrs_score: payload.asrs?.total_score ?? 4,
+  };
+
+  const mlModel = getPretrainedModel();
+  const mlPrediction = predictAdhdRisk(mlFeatureVector, mlModel);
+  return {
+    model_version: "logreg-synthetic-v1",
+    adhd_probability: mlPrediction.probability,
+    classification: mlPrediction.classification,
+    confidence: mlPrediction.confidence,
+    trained_on: "synthetic-distribution-adapted-from-Rojas-Libano-2019",
+    accuracy: mlModel.accuracy,
+  };
+}
+
 function localAnalysis(payload: AnalyzePayload): AnalysisResult {
   const cpt = payload.cpt!;
   const asrs = payload.asrs;
@@ -188,21 +214,7 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
     cpt.fatigue_slope != null ? `Fatigue Slope: ${cpt.fatigue_slope}/blok` : "Fatigue Slope: N/A";
   const cptNote = `CPT Go/No-Go (${payload.test_mode ?? "clinical"}, ${payload.duration_seconds ?? 360}s): Hit Rate ${Math.round((cpt.hit_rate ?? 0) * 100)}%, Omission ${Math.round((cpt.omission_rate ?? 0) * 100)}%, Commission ${Math.round((cpt.commission_rate ?? 0) * 100)}%, Median RT ${cpt.median_rt_ms ?? 0} ms, RTV ${cpt.rt_variability_ms ?? 0} ms, ${dPrimeText}, ${slopeText}, Antisipasi (<120ms): ${cpt.anticipatory_responses ?? 0}, Lapses (>750ms): ${cpt.attention_lapses ?? 0}, Interupsi Tab: ${payload.tab_interruptions ?? 0}.`;
 
-  // Build ML feature vector from payload
-  const mlFeatureVector: FeatureVector = {
-    commission_rate: cpt.commission_rate ?? 0,
-    omission_rate: cpt.omission_rate ?? 0,
-    median_rt_ms: cpt.median_rt_ms ?? 440,
-    rt_variability_ms: cpt.rt_variability_ms ?? 60,
-    d_prime: cpt.d_prime ?? 2.0,
-    fatigue_slope: cpt.fatigue_slope ?? -0.02,
-    tau_ms: payload.ex_gaussian?.tau_ms ?? null,
-    asrs_score: payload.asrs?.total_score ?? 4,
-  };
-
-  // Run ML classification
-  const mlModel = getPretrainedModel();
-  const mlPrediction = predictAdhdRisk(mlFeatureVector, mlModel);
+  const mlPrediction = computeMlPrediction(payload);
 
   // Incorporate GDI into gaze note
   const meanGdi = payload.gaze?.mean_gdi;
@@ -234,14 +246,7 @@ function localAnalysis(payload: AnalyzePayload): AnalysisResult {
   return {
     source: "local-clinical-triangulation-v3",
     is_diagnostic: false,
-    ml_prediction: {
-      model_version: "logreg-synthetic-v1",
-      adhd_probability: mlPrediction.probability,
-      classification: mlPrediction.classification,
-      confidence: mlPrediction.confidence,
-      trained_on: "synthetic-distribution-adapted-from-Rojas-Libano-2019",
-      accuracy: mlModel.accuracy,
-    },
+    ml_prediction: mlPrediction,
     layperson_insight: {
       stamina_headline: staminaHeadline,
       stamina_description: staminaDesc,
@@ -368,8 +373,15 @@ export async function POST(request: Request) {
   }
 
   try {
+    const mlPredictionData = computeMlPrediction(payload);
     const remote = await geminiAnalysis(payload);
-    return NextResponse.json(remote ?? localAnalysis(payload));
+    if (remote) {
+      return NextResponse.json({
+        ...remote,
+        ml_prediction: mlPredictionData,
+      });
+    }
+    return NextResponse.json(localAnalysis(payload));
   } catch {
     return NextResponse.json(localAnalysis(payload));
   }
