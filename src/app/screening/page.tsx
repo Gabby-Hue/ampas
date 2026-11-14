@@ -168,6 +168,7 @@ export default function ScreeningPage() {
   const [trailingBallPos, setTrailingBallPos] = useState({ x: 0.5, y: 0.5 });
   const trailingSamplesRef = useRef<TrailingSample[]>([]);
   const trailingStartedAt = useRef(0);
+  const [finalGazeSamples, setFinalGazeSamples] = useState<GazeSample[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -449,6 +450,7 @@ export default function ScreeningPage() {
     setActualDurationSec(elapsedSec);
 
     const allSamples = gaze.getAllSamples();
+    setFinalGazeSamples(allSamples);
     const finalTrialGdis = calculateTrialGdis(finalTrials, allSamples);
     const finalGdiSummary = summarizeGdiResults(finalTrialGdis);
 
@@ -721,6 +723,7 @@ export default function ScreeningPage() {
     const demoTrailingMetrics = calculateTrailingMetrics(demoTrailing);
     setTrailingSamples(demoTrailing);
     setTrailingMetrics(demoTrailingMetrics);
+    setFinalGazeSamples(profile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE);
 
     trialsRef.current = benchmark;
     setSessionId(`DEMO-${profile.toUpperCase()}`);
@@ -1649,10 +1652,10 @@ export default function ScreeningPage() {
           {((!isDemo && gaze.quality.status !== "unavailable") || isDemo) && (
             <RadarGazeHeatmap
               samples={
-                isDemo
-                  ? demoProfile === "stable"
-                    ? DEMO_STABLE_TRACE
-                    : DEMO_VARIABLE_TRACE
+                finalGazeSamples.length > 0
+                  ? finalGazeSamples
+                  : isDemo
+                  ? (demoProfile === "stable" ? DEMO_STABLE_TRACE : DEMO_VARIABLE_TRACE)
                   : (allGazeSamples.length > 0 ? allGazeSamples : gaze.trace)
               }
               gdiScore={

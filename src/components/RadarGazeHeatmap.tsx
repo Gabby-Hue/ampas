@@ -8,26 +8,33 @@ type Props = {
   isDemo?: boolean;
 };
 
-// Generate 256-color clinical thermal palette (Navy -> Cyan -> Green -> Yellow -> Orange -> Crimson -> White)
-function createThermalPalette(): Uint8ClampedArray {
+let cachedPalette: Uint8ClampedArray | null = null;
+
+// Generate 256-color clinical thermal palette (Navy -> Cyan -> Green -> Yellow -> Orange -> Crimson -> White-Hot)
+function getThermalPalette(): Uint8ClampedArray {
+  if (cachedPalette) return cachedPalette;
+  if (typeof document === "undefined") return new Uint8ClampedArray(256 * 4);
+
   const canvas = document.createElement("canvas");
   canvas.width = 256;
   canvas.height = 1;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return new Uint8ClampedArray(256 * 4);
 
   const grad = ctx.createLinearGradient(0, 0, 256, 0);
   grad.addColorStop(0.0, "rgba(11, 122, 83, 0)");
-  grad.addColorStop(0.15, "rgba(111, 211, 165, 0.35)");
-  grad.addColorStop(0.35, "rgba(11, 122, 83, 0.55)");
-  grad.addColorStop(0.55, "rgba(7, 94, 64, 0.75)");
-  grad.addColorStop(0.72, "rgba(154, 103, 0, 0.85)");
-  grad.addColorStop(0.88, "rgba(180, 35, 24, 0.95)");
-  grad.addColorStop(1.0, "rgba(117, 20, 12, 1.0)");
+  grad.addColorStop(0.12, "rgba(111, 211, 165, 0.35)");
+  grad.addColorStop(0.32, "rgba(11, 122, 83, 0.55)");
+  grad.addColorStop(0.52, "rgba(7, 94, 64, 0.75)");
+  grad.addColorStop(0.70, "rgba(154, 103, 0, 0.85)");
+  grad.addColorStop(0.85, "rgba(180, 35, 24, 0.95)");
+  grad.addColorStop(0.96, "rgba(235, 87, 87, 1.0)");
+  grad.addColorStop(1.0, "rgba(255, 255, 255, 1.0)"); // White-hot core at maximum intensity
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 256, 1);
-  return ctx.getImageData(0, 0, 256, 1).data;
+  cachedPalette = ctx.getImageData(0, 0, 256, 1).data;
+  return cachedPalette;
 }
 
 export function RadarGazeHeatmap({ samples, gdiScore, isDemo = false }: Props) {
@@ -56,169 +63,174 @@ export function RadarGazeHeatmap({ samples, gdiScore, isDemo = false }: Props) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const width = rect.width;
-    const height = rect.height;
+    const render = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.floor(rect.width) || canvas.clientWidth || 300;
+      const height = Math.floor(rect.height) || canvas.clientHeight || 240;
 
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      ctx.scale(dpr, dpr);
 
-    // Clinical light radar background
-    ctx.fillStyle = "#10241c";
-    ctx.fillRect(0, 0, width, height);
+      // Clinical dark radar background
+      ctx.fillStyle = "#10241c";
+      ctx.fillRect(0, 0, width, height);
 
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const maxRadius = Math.min(width, height) * 0.44;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const maxRadius = Math.min(width, height) * 0.44;
 
-    // 1. Draw Radar Grid
-    // Concentric rings
-    const rings = [
-      { r: maxRadius * 0.25, label: "25% (Foveal Focus)", color: "rgba(11, 122, 83, 0.30)", dash: [2, 3] },
-      { r: maxRadius * 0.50, label: "50% (Parafoveal)", color: "rgba(11, 122, 83, 0.16)", dash: [4, 4] },
-      { r: maxRadius * 0.75, label: "75% (Perifoveal)", color: "rgba(11, 122, 83, 0.12)", dash: [4, 4] },
-      { r: maxRadius * 1.00, label: "100% (Outer Boundary)", color: "rgba(11, 122, 83, 0.22)", dash: [] },
-    ];
+      // 1. Draw Radar Grid
+      const rings = [
+        { r: maxRadius * 0.25, label: "25% (Foveal Focus)", color: "rgba(11, 122, 83, 0.30)", dash: [2, 3] },
+        { r: maxRadius * 0.50, label: "50% (Parafoveal)", color: "rgba(11, 122, 83, 0.16)", dash: [4, 4] },
+        { r: maxRadius * 0.75, label: "75% (Perifoveal)", color: "rgba(11, 122, 83, 0.12)", dash: [4, 4] },
+        { r: maxRadius * 1.00, label: "100% (Outer Boundary)", color: "rgba(11, 122, 83, 0.22)", dash: [] },
+      ];
 
-    rings.forEach((ring) => {
-      ctx.strokeStyle = ring.color;
-      ctx.lineWidth = 1;
-      ctx.setLineDash(ring.dash);
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, ring.r, 0, Math.PI * 2);
-      ctx.stroke();
-    });
-    ctx.setLineDash([]);
-
-    // Radial spokes (Crosshair & 45 degree diagonals)
-    ctx.strokeStyle = "rgba(11, 122, 83, 0.10)";
-    ctx.lineWidth = 1;
-    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
-      ctx.beginPath();
-      ctx.moveTo(centerX, centerY);
-      ctx.lineTo(centerX + Math.cos(angle) * maxRadius, centerY + Math.sin(angle) * maxRadius);
-      ctx.stroke();
-    }
-
-    // Distance ring labels
-    ctx.fillStyle = "#5f756b";
-    ctx.font = "9px monospace";
-    ctx.textAlign = "left";
-    ctx.fillText("±0.05", centerX + 4, centerY - maxRadius * 0.25 - 2);
-    ctx.fillText("±0.10", centerX + 4, centerY - maxRadius * 0.50 - 2);
-    ctx.fillText("±0.15", centerX + 4, centerY - maxRadius * 0.75 - 2);
-
-    if (valid.length === 0) {
-      ctx.fillStyle = "#5f756b";
-      ctx.font = "12px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("Data fiksasi gaze tidak cukup", centerX, centerY);
-      return;
-    }
-
-    if (viewType === "thermal") {
-      // 2. Offscreen True Heatmap Accumulation
-      const offCanvas = document.createElement("canvas");
-      offCanvas.width = width;
-      offCanvas.height = height;
-      const offCtx = offCanvas.getContext("2d");
-      if (!offCtx) return;
-
-      // Blur size & intensity
-      const spotRadius = Math.max(16, maxRadius * 0.18);
-      valid.forEach((s) => {
-        // Map normalized relative coordinates (0..1) to radar circle bounds
-        const mappedX = centerX + (s.x - 0.5) * (maxRadius * 2.8);
-        const mappedY = centerY + (s.y - 0.5) * (maxRadius * 2.8);
-
-        const radial = offCtx.createRadialGradient(mappedX, mappedY, 0, mappedX, mappedY, spotRadius);
-        radial.addColorStop(0, "rgba(0, 0, 0, 0.24)");
-        radial.addColorStop(1, "rgba(0, 0, 0, 0)");
-
-        offCtx.fillStyle = radial;
-        offCtx.beginPath();
-        offCtx.arc(mappedX, mappedY, spotRadius, 0, Math.PI * 2);
-        offCtx.fill();
+      rings.forEach((ring) => {
+        ctx.strokeStyle = ring.color;
+        ctx.lineWidth = 1;
+        ctx.setLineDash(ring.dash);
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, ring.r, 0, Math.PI * 2);
+        ctx.stroke();
       });
+      ctx.setLineDash([]);
 
-      // Colorize using thermal palette
-      const imgData = offCtx.getImageData(0, 0, width, height);
-      const pixels = imgData.data;
-      const palette = createThermalPalette();
-
-      for (let i = 0; i < pixels.length; i += 4) {
-        const alpha = pixels[i + 3];
-        if (alpha > 0) {
-          const palIdx = alpha * 4;
-          pixels[i] = palette[palIdx];
-          pixels[i + 1] = palette[palIdx + 1];
-          pixels[i + 2] = palette[palIdx + 2];
-          pixels[i + 3] = Math.min(240, palette[palIdx + 3] * 1.8);
-        }
+      // Radial spokes (Crosshair & 45 degree diagonals)
+      ctx.strokeStyle = "rgba(11, 122, 83, 0.10)";
+      ctx.lineWidth = 1;
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.lineTo(centerX + Math.cos(angle) * maxRadius, centerY + Math.sin(angle) * maxRadius);
+        ctx.stroke();
       }
 
-      offCtx.putImageData(imgData, 0, 0);
+      // Distance ring labels
+      ctx.fillStyle = "#5f756b";
+      ctx.font = "9px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText("±0.05", centerX + 4, centerY - maxRadius * 0.25 - 2);
+      ctx.fillText("±0.10", centerX + 4, centerY - maxRadius * 0.50 - 2);
+      ctx.fillText("±0.15", centerX + 4, centerY - maxRadius * 0.75 - 2);
 
-      // Clip to radar bounds for clinical clean look
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(offCanvas, 0, 0);
-      ctx.restore();
-    } else {
-      // Scatter Gaze Points view with connected micro-vectors
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
-      ctx.clip();
+      if (valid.length === 0) {
+        ctx.fillStyle = "#5f756b";
+        ctx.font = "12px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("Data fiksasi gaze tidak cukup", centerX, centerY);
+        return;
+      }
 
-      ctx.strokeStyle = "rgba(11, 122, 83, 0.25)";
-      ctx.lineWidth = 1;
+      if (viewType === "thermal") {
+        // 2. Offscreen True Heatmap Accumulation
+        const offCanvas = document.createElement("canvas");
+        offCanvas.width = width;
+        offCanvas.height = height;
+        const offCtx = offCanvas.getContext("2d", { willReadFrequently: true });
+        if (!offCtx) return;
+
+        // Blur size & intensity
+        const spotRadius = Math.max(16, maxRadius * 0.18);
+        valid.forEach((s) => {
+          // Map normalized relative coordinates (0..1) to radar circle bounds
+          const mappedX = centerX + (s.x - 0.5) * (maxRadius * 2.8);
+          const mappedY = centerY + (s.y - 0.5) * (maxRadius * 2.8);
+
+          const radial = offCtx.createRadialGradient(mappedX, mappedY, 0, mappedX, mappedY, spotRadius);
+          radial.addColorStop(0, "rgba(0, 0, 0, 0.26)");
+          radial.addColorStop(1, "rgba(0, 0, 0, 0)");
+
+          offCtx.fillStyle = radial;
+          offCtx.beginPath();
+          offCtx.arc(mappedX, mappedY, spotRadius, 0, Math.PI * 2);
+          offCtx.fill();
+        });
+
+        // Colorize using thermal palette
+        const imgData = offCtx.getImageData(0, 0, width, height);
+        const pixels = imgData.data;
+        const palette = getThermalPalette();
+
+        for (let i = 0; i < pixels.length; i += 4) {
+          const alpha = pixels[i + 3];
+          if (alpha > 0) {
+            const palIdx = Math.min(255, alpha) * 4;
+            pixels[i] = palette[palIdx];
+            pixels[i + 1] = palette[palIdx + 1];
+            pixels[i + 2] = palette[palIdx + 2];
+            pixels[i + 3] = Math.min(240, Math.round(palette[palIdx + 3] * 1.8));
+          }
+        }
+
+        offCtx.putImageData(imgData, 0, 0);
+
+        // Clip to radar bounds for clinical clean look
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(offCanvas, 0, 0);
+        ctx.restore();
+      } else {
+        // Scatter Gaze Points view with connected micro-vectors
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maxRadius, 0, Math.PI * 2);
+        ctx.clip();
+
+        ctx.strokeStyle = "rgba(11, 122, 83, 0.25)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        valid.forEach((s, idx) => {
+          const x = centerX + (s.x - 0.5) * (maxRadius * 2.8);
+          const y = centerY + (s.y - 0.5) * (maxRadius * 2.8);
+          if (idx === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        valid.forEach((s) => {
+          const x = centerX + (s.x - 0.5) * (maxRadius * 2.8);
+          const y = centerY + (s.y - 0.5) * (maxRadius * 2.8);
+          const dx = s.x - 0.5;
+          const dy = s.y - 0.5;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          ctx.fillStyle = dist <= 0.08 ? "#0b7a53" : dist <= 0.18 ? "#9a6700" : "#b42318";
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      // Center crosshair marker
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      valid.forEach((s, idx) => {
-        const x = centerX + (s.x - 0.5) * (maxRadius * 2.8);
-        const y = centerY + (s.y - 0.5) * (maxRadius * 2.8);
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
+      ctx.moveTo(centerX - 8, centerY);
+      ctx.lineTo(centerX + 8, centerY);
+      ctx.moveTo(centerX, centerY - 8);
+      ctx.lineTo(centerX, centerY + 8);
       ctx.stroke();
 
-      valid.forEach((s) => {
-        const x = centerX + (s.x - 0.5) * (maxRadius * 2.8);
-        const y = centerY + (s.y - 0.5) * (maxRadius * 2.8);
-        const dx = s.x - 0.5;
-        const dy = s.y - 0.5;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+      // Central core dot
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    };
 
-        ctx.fillStyle = dist <= 0.08 ? "#0b7a53" : dist <= 0.18 ? "#9a6700" : "#b42318";
-        ctx.beginPath();
-        ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-      });
-      ctx.restore();
-    }
-
-    // Central Bullseye cross marker
-    ctx.strokeStyle = "#10241c";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(centerX - 8, centerY);
-    ctx.lineTo(centerX + 8, centerY);
-    ctx.moveTo(centerX, centerY - 8);
-    ctx.lineTo(centerX, centerY + 8);
-    ctx.stroke();
-
-    // Central core dot
-    ctx.fillStyle = "#0b7a53";
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 2.5, 0, Math.PI * 2);
-    ctx.fill();
+    render();
+    window.addEventListener("resize", render);
+    return () => window.removeEventListener("resize", render);
   }, [samples, viewType, valid]);
 
   const stabilityBadge =
