@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { loadUsersFromStorage, loginUser, setActiveUser } from "@/lib/auth/auth";
 
 export default function LoginPage() {
@@ -44,9 +43,6 @@ export default function LoginPage() {
         <div className="nav-center-menu">
           <Link href="/">Beranda</Link>
           <Link href="/screening">Mulai Tes</Link>
-        </div>
-        <div className="nav-right-actions">
-          <ThemeToggle />
         </div>
       </nav>
 

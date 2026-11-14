@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProfileIconButton } from "@/components/ProfileIconButton";
 import { getActiveUser, subscribeAuth, type SafeUser } from "@/lib/auth/auth";
 import { persistSessionToStorage } from "@/lib/storage/history";
@@ -922,7 +921,6 @@ export default function ScreeningPage() {
           </span>
         </div>
         <div className="nav-right-actions">
-          <ThemeToggle />
           {user ? (
             <ProfileIconButton user={user} />
           ) : (

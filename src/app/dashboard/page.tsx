@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { ProfileIconButton } from "@/components/ProfileIconButton";
 import { getActiveUser, setActiveUser, type SafeUser } from "@/lib/auth/auth";
 import {
@@ -163,7 +162,6 @@ export default function DashboardPage() {
           <Link href="/dashboard">Dashboard</Link>
         </div>
         <div className="nav-right-actions">
-          <ThemeToggle />
           <ProfileIconButton user={user} />
         </div>
       </nav>
