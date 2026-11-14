@@ -129,6 +129,7 @@ export default function ScreeningPage() {
   const [practiceFeedback, setPracticeFeedback] = useState("Klik tombol untuk mencoba 6 stimulus kilat.");
   const [practiceScore, setPracticeScore] = useState(0);
   const [practiceRt, setPracticeRt] = useState<number | null>(null);
+  const [countdownNum, setCountdownNum] = useState<number | null>(null);
   const [practiceKind, setPracticeKind] = useState<"go" | "no-go" | null>(null);
   const [practiceTrialVisible, setPracticeTrialVisible] = useState(false);
   const [practiceStepIndex, setPracticeStepIndex] = useState(0);
@@ -217,7 +218,6 @@ export default function ScreeningPage() {
 
   const enableCamera = async () => {
     setCameraStatus("starting");
-    setSkipCamera(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } },
@@ -1040,7 +1040,7 @@ export default function ScreeningPage() {
             )}
             {practiceState === "passed" && (
               <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: "0.82rem" }}>
-                Latihan Lulus ✓
+                Latihan Lulus ✓ {countdownNum !== null && `(Mulai otomatis dalam ${countdownNum}s)`}
               </span>
             )}
             {practiceState === "retry" && (
